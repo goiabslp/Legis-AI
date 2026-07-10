@@ -38,6 +38,21 @@ export declare class DocumentService {
         status: string;
         authorId: string;
     })[]>;
+    findBySecretariat(secretariatId: string): Promise<({
+        author: {
+            name: string;
+        };
+    } & {
+        id: string;
+        createdAt: Date;
+        updatedAt: Date;
+        secretariatId: string;
+        title: string;
+        content: string;
+        type: string;
+        status: string;
+        authorId: string;
+    })[]>;
     getStats(secretariatId: string, userId: string): Promise<{
         total: number;
         pending: number;
@@ -53,3 +68,4 @@ export declare class DocumentService {
         documentId: string;
     }>;
 }
+export declare function rephraseInstruction(instruction: string, tema: string): string;

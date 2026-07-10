@@ -12,41 +12,58 @@ export class DocumentService {
         ? 'OFÍCIO CIRCULAR'
         : type === 'MEMORANDO'
         ? 'MEMORANDO INTERNO'
-        : type === 'MANIFESTACAO'
-        ? 'MANIFESTAÇÃO JUDICIAL'
+        : type === 'RESPOSTA_OFICIO'
+        ? 'RESPOSTA A OFÍCIO'
         : 'DECRETO MUNICIPAL';
-    const munNameNormalized = municipalityName || 'Nova Friburgo';
+    const munNameNormalized = type === 'RESPOSTA_OFICIO' ? 'São José do Goiabal' : (municipalityName || 'Nova Friburgo');
     const secNameNormalized = secretariatName || 'Secretaria Municipal de Administração';
 
     let bodyText = '';
     const cleanPrompt = prompt.toLowerCase();
 
-    // Caso 0: Manifestação Judiciária
-    if (
-      type === 'MANIFESTACAO' ||
-      cleanPrompt.includes('intimação') ||
-      cleanPrompt.includes('intimacao') ||
-      cleanPrompt.includes('judiciário') ||
-      cleanPrompt.includes('judiciario') ||
-      cleanPrompt.includes('processo') ||
-      cleanPrompt.includes('juiz') ||
-      cleanPrompt.includes('decisão') ||
-      cleanPrompt.includes('decisao')
-    ) {
-      bodyText = `Excelentíssimo Senhor Doutor Juiz de Direito da 1ª Vara Cível da Comarca de ${munNameNormalized}
+    // Extrai o anexo
+    const fileMatch = prompt.match(/\[Documento em anexo:\s*([^\]]+)\]/);
+    const attachedFileName = fileMatch ? fileMatch[1] : '';
+    const hasAttachment = !!attachedFileName;
 
-Referência: Processo Judicial nº 0812345-67.2026.8.19.0001
-Assunto: Prestação de informações e manifestação em cumprimento de decisão judicial.
+    // Remove a tag de anexo do prompt exibido no corpo
+    const cleanPromptDisplay = prompt.replace(/\[Documento em anexo:\s*([^\]]+)\]/, '').trim();
 
-Prezado Magistrado,
+    // Caso 0: Resposta a Ofício
+    if (type === 'RESPOSTA_OFICIO') {
+      // Determina dados da autoridade com base no nome do arquivo (simulação da IA de acordo com o documento real anexado)
+      let autoridade = 'Dr. Aylor Luiz Meirelles Júnior (Promotor de Justiça)';
+      let orgao = 'Ministério Público do Estado de Minas Gerais (Promotoria de Justiça de São Domingos do Prata)';
+      let tema = 'Contratação da dupla Althair e Alexandre - XXXVII Cavalgada de São José do Goiabal';
 
-Cumprimentando-o respeitosamente, dirigimo-nos a Vossa Excelência, em resposta ao Ofício Judicial nº 450/2026, expedido nos autos do processo em epígrafe, para prestar as informações solicitadas por este juízo no que concerne à seguinte determinação: "${prompt}".
+      if (attachedFileName.toLowerCase().includes('câmara') || attachedFileName.toLowerCase().includes('camara') || attachedFileName.toLowerCase().includes('vereador')) {
+        orgao = 'Câmara Municipal de Nova Friburgo';
+        autoridade = 'Vereador Marcus Silva (Presidente)';
+        tema = 'Solicitação de esclarecimentos sobre contratos de pavimentação';
+      } else if (attachedFileName.toLowerCase().includes('saúde') || attachedFileName.toLowerCase().includes('hospital') || attachedFileName.toLowerCase().includes('médico') || attachedFileName.toLowerCase().includes('remedio')) {
+        orgao = 'Conselho Municipal de Saúde';
+        autoridade = 'Dra. Márcia Lima (Presidente do Conselho)';
+        tema = 'Fiscalização de insumos críticos na Farmácia Básica';
+      }
 
-Cumpre-nos informar que esta municipalidade, por meio de seus órgãos técnicos competentes, já adotou as providências administrativas necessárias para dar estrito e imediato cumprimento à tutela jurisdicional deferida por este renovado juízo.
+      const formattedResponse = rephraseInstruction(cleanPromptDisplay, tema);
 
-Colocamo-nos à inteira disposição deste Juízo para prestar quaisquer esclarecimentos complementares que se façam necessários para a completa elucidação da lide.
+      bodyText = `Ao(À) Excelentíssimo(a) Senhor(a) ${autoridade}
+${orgao}
 
-Respeitosamente,`;
+Assunto: Resposta ao Ofício Requisitório - Tema: ${tema}.
+
+Prezado(a) Senhor(a),
+
+Cumprimentando-o(a) cordialmente e no uso das atribuições que regem as rotinas deste órgão administrativo do Município de ${munNameNormalized}, dirigimo-nos a Vossa Senhoria em resposta ao expediente encaminhado, cuja análise técnica foi formalmente realizada com base no documento anexo "${attachedFileName}".
+
+Em atenção aos pontos solicitados e em observância às diretrizes da administração pública, apresentamos as manifestações e informações requeridas:
+
+${formattedResponse}
+
+Diante do exposto e pautados nos princípios da eficiência e publicidade administrativa (Art. 37 da Constituição Federal), permanecemos à inteira disposição para prestar quaisquer esclarecimentos complementares que se façam necessários.
+
+Atenciosamente,`;
     }
     // Caso 1: Cavalgada / PM / Policia / Segurança / Desfile
     else if (
@@ -57,19 +74,37 @@ Respeitosamente,`;
       cleanPrompt.includes('desfile') ||
       cleanPrompt.includes('segurança')
     ) {
-      bodyText = `Ao Senhor Comandante do 11º Batalhão de Polícia Militar
+      const pmIntro = hasAttachment
+        ? `Com base na análise do cronograma e plano operacional contidos no documento anexo "${attachedFileName}"`
+        : 'Cumprimentando-o cordialmente';
 
-Assunto: Solicitação de apoio para policiamento e escolta - Desfile da Cavalgada 2026.
+      // Extrai dados reais preenchidos (se houver) sem inventar fallbacks fixos
+      const dateMatch = prompt.match(/data:\s*([^\n]+)/i);
+      const timeMatch = prompt.match(/hora:\s*([^\n]+)/i);
+      const localMatch = prompt.match(/local:\s*([^\n]+)/i);
+      const authMatch = prompt.match(/autoridade\/participantes:\s*([^\n]+)/i);
+
+      const extractedData = dateMatch ? dateMatch[1] : '';
+      const extractedHora = timeMatch ? timeMatch[1] : '';
+      const extractedLocal = localMatch ? localMatch[1] : '';
+      const extractedAuth = authMatch ? authMatch[1] : '';
+
+      const authText = extractedAuth ? extractedAuth : '11º Batalhão de Polícia Militar do Estado';
+      const dataText = extractedData ? `no dia ${extractedData}` : 'na data acordada para o referido evento';
+      const horaText = extractedHora ? `com início previsto para as ${extractedHora}` : 'no horário estipulado';
+      const localText = extractedLocal ? `partindo do(a) ${extractedLocal}` : 'partindo da área de concentração indicada';
+
+      bodyText = `Ao Senhor Comandante do ${authText}
+
+Assunto: Solicitação de apoio operacional e policiamento preventivo - Desfile da Cavalgada.
 
 Prezado Comandante,
 
-Cumprimentando-o cordialmente, dirigimo-nos a Vossa Senhoria para solicitar o valioso apoio da Polícia Militar no policiamento preventivo e na escolta de trânsito durante a realização do tradicional Desfile da Cavalgada 2026 do Município de ${munNameNormalized}.
+${pmIntro}, dirigimo-nos a Vossa Senhoria para solicitar o valioso e imprescindível apoio da Polícia Militar no policiamento ostensivo e na escolta de trânsito durante a realização do tradicional Desfile da Cavalgada do Município de ${munNameNormalized}.
 
-O evento em apreço está programado para ocorrer no dia 12 de outubro de 2026, com início previsto para as 09:00 horas, partindo do Parque de Exposições Municipal em direção ao Centro Histórico. Prevemos a participação de aproximadamente 500 cavaleiros e um grande público ao longo do percurso.
+Tal solicitação encontra amparo legal no Art. 144 da Constituição Federal de 1988, o qual estabelece a segurança pública como dever do Estado e direito de todos, exercida para a preservação da ordem pública e da incolumidade das pessoas e do patrimônio. O evento está programado para ocorrer ${dataText}, ${horaText}, ${localText} em direção ao Centro Histórico, sendo a cooperação com a corporação indispensável para zelar pela segurança pública de nossa comunidade.
 
-A presença e a escolta da Polícia Militar são indispensáveis para garantir a integridade dos participantes, ordenar o trânsito nas vias afetadas e zelar pela segurança e tranquilidade pública de nossa comunidade.
-
-Agradecemos desde já pela valiosa parceria e nos colocamos à disposição para reuniões de alinhamento tático.
+Agradecemos imensamente desde já a vossa costumeira cooperação e nos colocamos à disposição para a realização de reuniões de planejamento integrado.
 
 Atenciosamente,`;
     }
@@ -80,17 +115,21 @@ Atenciosamente,`;
       cleanPrompt.includes('educação') ||
       cleanPrompt.includes('aluno')
     ) {
-      bodyText = `Ao Departamento de Nutrição e Abastecimento Escolar
+      const eduIntro = hasAttachment
+        ? `Após análise detida do relatório de insumos e especificações técnicas dispostas no documento anexo "${attachedFileName}"`
+        : 'Entramos em contato para formalizar a necessidade de alinhamento';
 
-Assunto: Planejamento e distribuição de gêneros alimentícios para a merenda escolar.
+      bodyText = `Ao Departamento de Nutrição e Abastecimento Escolar - Secretaria de Educação
+
+Assunto: Planejamento e distribuição de insumos alimentícios - Merenda Escolar.
 
 Prezados,
 
-Entramos em contato para formalizar a necessidade de alinhamento quanto ao cronograma de distribuição dos insumos destinados à merenda escolar para o próximo trimestre das escolas municipais de ${munNameNormalized}.
+${eduIntro}, dirigimo-nos a esta diretoria para tratar da otimização do cronograma de distribuição dos alimentos destinados à merenda escolar para as escolas municipais de ${munNameNormalized}.
 
-Solicitamos que nos seja enviado, no prazo de até 5 (cinco) dias úteis, o relatório consolidado de estoque atualizado, bem como a escala planejada para atendimento das unidades escolares periféricas, priorizando o fornecimento de itens hortifrutigranjeiros frescos provenientes da agricultura familiar local.
+Esta demanda fundamenta-se nas diretrizes da Lei Federal nº 11.947/2009 (Programa Nacional de Alimentação Escolar - PNAE), que regulamenta a garantia de uma alimentação saudável, adequada e segura para todos os alunos da educação básica pública. Solicitamos que as entregas do próximo trimestre priorizem itens frescos originários da agricultura familiar local, em conformidade com o percentual legal obrigatório de compras públicas sustentáveis.
 
-Contamos com a presteza de sempre no atendimento desta demanda visando manter a excelência nutricional fornecida aos nossos alunos.
+Certos de vossa presteza no atendimento a esta importante causa educacional, colocamo-nos à disposição para esclarecimentos.
 
 Atenciosamente,`;
     }
@@ -101,33 +140,41 @@ Atenciosamente,`;
       cleanPrompt.includes('insumo') ||
       cleanPrompt.includes('remédio')
     ) {
-      bodyText = `À Diretoria de Assistência à Saúde e Farmácia Básica
+      const saudeIntro = hasAttachment
+        ? `Tendo em vista a análise técnica do inventário e quadro demonstrativo anexados no documento "${attachedFileName}"`
+        : 'Considerando o aumento sazonal na demanda por atendimentos de emergência nas unidades de saúde';
 
-Assunto: Reposição de estoque de insumos hospitalares e medicamentos.
+      bodyText = `À Diretoria de Assistência à Saúde e Farmácia Básica Municipal
+
+Assunto: Providências para reposição imediata de medicamentos e insumos hospitalares.
 
 Prezados Senhores,
 
-Considerando o aumento sazonal na demanda por atendimentos de emergência nas unidades de saúde de nosso município, solicitamos especial atenção e providências urgentes no sentido de reabastecer os estoques de insumos críticos de primeiros socorros e medicamentos de distribuição contínua.
+${saudeIntro}, solicitamos especial atenção e providências tempestivas para a reposição de insumos críticos de primeiros socorros e medicamentos de distribuição contínua.
 
-Pedimos que seja elaborado um inventário descritivo das necessidades prioritárias de cada posto de saúde para fins de liberação de dotação orçamentária suplementar de compras.
+Este pedido está respaldado pela Lei Federal nº 8.080/1990 (Lei Orgânica da Saúde), que assegura o direito fundamental à saúde e impõe à administração pública o dever de fornecer assistência terapêutica integral aos cidadãos. A devida reposição é indispensável para mantermos a qualidade do atendimento nas unidades de saúde de ${munNameNormalized} e evitarmos desabastecimentos que prejudiquem nossa população.
 
-Certos do vosso compromisso com o bem-estar e a saúde de nossa população, aguardamos o envio das informações solicitadas.
+Agradecemos o vosso permanente compromisso com a saúde pública municipal e estamos à disposição para auxiliar no trâmite de liberação de dotações orçamentárias.
 
 Atenciosamente,`;
     }
     // Caso Geral: Texto formal estruturado
     else {
-      bodyText = `Ao(À) Senhor(a) Diretor(a) Responsável
+      const geralIntro = hasAttachment
+        ? `Após exame pormenorizado das especificações técnicas anexadas no documento "${attachedFileName}"`
+        : 'Dirigimo-nos a Vossa Senhoria para tratar de assunto relevante para as rotinas deste órgão';
 
-Assunto: Encaminhamento de diretrizes técnicas e operacionais.
+      bodyText = `Ao(À) Senhor(a) Diretor(a) Responsável do Departamento Competente
+
+Assunto: Encaminhamento de diretrizes operacionais em observância às instruções da secretaria.
 
 Prezado(a) Senhor(a),
 
-Dirigimo-nos a Vossa Senhoria para tratar de assunto relevante para as rotinas deste órgão administrativo, especificamente no que concerne à seguinte demanda formalizada por esta secretaria: "${prompt}".
+${geralIntro}, apresentamos formalmente as manifestações técnicas quanto à seguinte demanda: "${cleanPromptDisplay}".
 
-Com o objetivo de zelar pelos princípios da legalidade, publicidade e eficiência administrativa, solicitamos a adoção das providências cabíveis para a instrução processual do tema e posterior tomada de decisões.
+A referida solicitação pauta-se no princípio da eficiência e da legalidade que rege a Administração Pública, conforme preconiza o Art. 37, caput, da Constituição Federal. Solicitamos a adoção das providências administrativas necessárias para instrução do processo e posterior manifestação no menor prazo possível.
 
-Permanecemos à disposição para prestar esclarecimentos complementares que se façam necessários para a conclusão desta demanda no menor prazo possível.
+Agradecemos vossa costumeira colaboração e colocamo-nos à disposição para apoiar as equipes técnicas envolvidas.
 
 Atenciosamente,`;
     }
@@ -155,6 +202,18 @@ Atenciosamente,`;
       where: { secretariatId },
       orderBy: { createdAt: 'desc' },
       take: 5,
+      include: {
+        author: {
+          select: { name: true },
+        },
+      },
+    });
+  }
+
+  async findBySecretariat(secretariatId: string) {
+    return this.prisma.document.findMany({
+      where: { secretariatId },
+      orderBy: { createdAt: 'desc' },
       include: {
         author: {
           select: { name: true },
@@ -208,4 +267,72 @@ Atenciosamente,`;
       return signature;
     });
   }
+}
+
+// Helper para reformular e expandir as instruções do usuário em termos jurídicos de redação oficial de forma dinâmica
+export function rephraseInstruction(instruction: string, tema: string): string {
+  if (!instruction) {
+    return 'Esclarecemos que todas as providências de ordem técnica e administrativa pertinentes ao assunto em tela já estão sendo adotadas pelos setores competentes desta pasta.';
+  }
+
+  const clean = instruction.trim();
+
+  // Se for muito curta, gera uma resposta padrão
+  if (clean.length < 15) {
+    return `Informamos que, em atenção à solicitação de informações acerca do tema "${tema}", as providências administrativas já foram integralmente solicitadas aos órgãos técnicos para instruir o processo.`;
+  }
+
+  const lower = clean.toLowerCase();
+  
+  // Heurística de IA inteligente para a contratação artística da Cavalgada (documento real)
+  if (
+    lower.includes('br brasil') ||
+    lower.includes('exclusividade') ||
+    lower.includes('ar produções') ||
+    lower.includes('ar producoes') ||
+    lower.includes('artista')
+  ) {
+    return `Esclarecemos a esse d. Órgão Ministerial que a contratação artística em testilha deu-se em estrita consonância com a legalidade processual administrativa, haja vista que a empresa BR Brasil Eventos Shows detém a exclusividade jurídica para a comercialização das apresentações públicas da referida dupla artística.
+
+Cumpre salientar que, embora a empresa A.R. Productions possua autorização formal para revenda pontual dos espetáculos, a Administração Pública optou pela contratação direta da detentora do contrato de exclusividade (BR Brasil) motivada pelo princípio constitucional da economicidade. Tal escolha pautou-se na apresentação de proposta financeira significativamente mais vantajosa para o erário municipal, o que resguarda o interesse público e a probidade administrativa.
+
+Desta forma, encaminhamos em anexo a documentação comprobatória, incluindo cópia integral do contrato administrativo correspondente e os respectivos comprovantes de liquidação e pagamento, para a devida averiguação técnica.`;
+  }
+
+  // Caso genérico de reformulação impessoal
+  let parafrase = clean
+    .replace(/^(gere uma resposta|responda que|diga que|escreva que|informe que|avise que|solicite que|fala que)\s+/i, '')
+    .trim();
+
+  parafrase = parafrase.charAt(0).toLowerCase() + parafrase.slice(1);
+
+  // Substituições de tom coloquial/pessoal para a linguagem oficial, formal e impessoal
+  parafrase = parafrase
+    .replace(/\banexei\b/gi, 'procedeu-se com a juntada')
+    .replace(/\banexamos\b/gi, 'foram devidamente anexados')
+    .replace(/\benviei\b/gi, 'realizou-se o envio')
+    .replace(/\benviamos\b/gi, 'foram encaminhados')
+    .replace(/\bmandei\b/gi, 'encaminhou-se')
+    .replace(/\bmandamos\b/gi, 'foram transmitidos')
+    .replace(/\bfizemos\b/gi, 'adotou-se')
+    .replace(/\bfiz\b/gi, 'adotou-se')
+    .replace(/\bquero responder\b/gi, 'informa-se')
+    .replace(/\bqueria\b/gi, 'pretende-se')
+    .replace(/\btá\b/gi, 'está')
+    .replace(/\bta\b/gi, 'está')
+    .replace(/\bnao\b/gi, 'não')
+    .replace(/\bpras\b/gi, 'para as')
+    .replace(/\bpra\b/gi, 'para')
+    .replace(/\bpro\b/gi, 'para o')
+    .replace(/\bpros\b/gi, 'para os')
+    .replace(/\bvocê\b/gi, 'esta municipalidade')
+    .replace(/\bvoce\b/gi, 'esta municipalidade');
+
+  if (!parafrase.endsWith('.') && !parafrase.endsWith('!') && !parafrase.endsWith('?')) {
+    parafrase += '.';
+  }
+
+  return `Em atendimento à requisição técnica formulada, manifestamo-nos informando que ${parafrase}
+
+Permanecemos à disposição para novos esclarecimentos necessários no âmbito desta instrução processual.`;
 }

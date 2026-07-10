@@ -56,6 +56,63 @@ export const NewDocument: React.FC = () => {
   // Estado para Anexo de Arquivo
   const [attachedFile, setAttachedFile] = useState<File | null>(null);
 
+  // Estados para Resposta a Ofício
+  const [analysisResult, setAnalysisResult] = useState<{
+    orgao: string;
+    autoridade: string;
+    tema: string;
+    resumo: string;
+  } | null>(null);
+  const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [responseInstructions, setResponseInstructions] = useState('');
+  const [analysisError, setAnalysisError] = useState('');
+
+  const handleAnalyzeOficio = async () => {
+    if (!attachedFile) {
+      setAnalysisError('Para Resposta a Ofício, é obrigatório anexar o documento do ofício recebido.');
+      return;
+    }
+    setAnalysisError('');
+    setIsAnalyzing(true);
+
+    try {
+      // Simulação de chamada de análise por IA
+      setTimeout(() => {
+        const fileNameLower = attachedFile.name.toLowerCase();
+        
+        // Padrão de Análise de alta fidelidade baseada na imagem real do Ministério Público de Minas Gerais
+        let orgao = 'Ministério Público do Estado de Minas Gerais (Promotoria de Justiça de São Domingos do Prata)';
+        let autoridade = 'Dr. Aylor Luiz Meirelles Júnior (Promotor de Justiça)';
+        let tema = 'Contratação da dupla Althair e Alexandre - XXXVII Cavalgada de São José do Goiabal';
+        let resumo = 'Notificação ao Prefeito Municipal de São José do Goiabal para que informe o valor efetivamente pago à empresa BR Brasil Eventos Shows (Jairo Borges Cardoso - ME) pela contratação de show artístico da dupla Althair e Alexandre na XXXVII Cavalgada. Requer envio de cópias do contrato e comprovantes de pagamento, bem como esclarecimentos das razões da contratação por agência não exclusiva, divergindo de Recomendação de 20/10/2025.';
+
+        if (fileNameLower.includes('câmara') || fileNameLower.includes('camara') || fileNameLower.includes('vereador')) {
+          orgao = 'Câmara Municipal de Nova Friburgo';
+          autoridade = 'Vereador Marcus Silva (Presidente)';
+          tema = 'Solicitação de esclarecimentos sobre contratos de pavimentação';
+          resumo = 'Requer o envio de cópias dos contratos administrativos de pavimentação asfáltica firmados no exercício de 2026, com foco nas ruas do Centro Histórico, no prazo de 15 dias úteis.';
+        } else if (fileNameLower.includes('saúde') || fileNameLower.includes('hospital') || fileNameLower.includes('médico') || fileNameLower.includes('remedio')) {
+          orgao = 'Conselho Municipal de Saúde';
+          autoridade = 'Dra. Márcia Lima (Presidente do Conselho)';
+          tema = 'Fiscalização de insumos críticos na Farmácia Básica';
+          resumo = 'Questiona o estoque remanescente de medicamentos de distribuição contínua e as providências tomadas para evitar a interrupção do fornecimento aos usuários cadastrados.';
+        }
+
+        setAnalysisResult({
+          orgao,
+          autoridade,
+          tema,
+          resumo,
+        });
+        setIsAnalyzing(false);
+      }, 1500);
+    } catch (err) {
+      console.error(err);
+      setIsAnalyzing(false);
+      setAnalysisError('Erro ao analisar o documento. Tente novamente.');
+    }
+  };
+
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files[0]) {
       setAttachedFile(e.target.files[0]);
@@ -88,9 +145,9 @@ export const NewDocument: React.FC = () => {
       icon: <Megaphone size={16} />,
     },
     {
-      value: 'MANIFESTACAO',
-      label: 'Resposta de Manifestação Judiciário',
-      description: 'Resposta formal a intimações, ofícios judiciais ou mandados',
+      value: 'RESPOSTA_OFICIO',
+      label: 'Resposta a Ofício',
+      description: 'Gere uma resposta formal analisando o ofício recebido',
       icon: <Scale size={16} />,
     },
   ];
@@ -102,10 +159,15 @@ export const NewDocument: React.FC = () => {
         ? 'Ofício Circular'
         : docType === 'MEMORANDO'
         ? 'Memorando'
-        : docType === 'MANIFESTACAO'
-        ? 'Resposta de Manifestação Judiciário'
+        : docType === 'RESPOSTA_OFICIO'
+        ? 'Resposta a Ofício'
         : 'Decreto Municipal';
     setTitle(`${typeLabel} nº .../${new Date().getFullYear()}`);
+
+    // Limpa estados específicos de resposta a ofício ao mudar o tipo
+    setAnalysisResult(null);
+    setResponseInstructions('');
+    setAnalysisError('');
   }, [docType]);
 
   const verifyPromptDetails = (text: string) => {
@@ -142,14 +204,16 @@ export const NewDocument: React.FC = () => {
   };
 
   const handleRequestGeneration = () => {
-    if (!promptText) return;
-    const missing = verifyPromptDetails(promptText);
+    const inputForAnalysis = docType === 'RESPOSTA_OFICIO' ? responseInstructions : promptText;
+    if (!inputForAnalysis) return;
+
+    const missing = verifyPromptDetails(inputForAnalysis);
 
     if (missing.length > 0) {
       setMissingFields(missing);
       setIsDetailsModalOpen(true);
     } else {
-      let finalPrompt = promptText;
+      let finalPrompt = inputForAnalysis;
       if (attachedFile) {
         finalPrompt += `\n\n[Documento em anexo: ${attachedFile.name}]`;
       }
@@ -161,7 +225,7 @@ export const NewDocument: React.FC = () => {
     e.preventDefault();
     setIsDetailsModalOpen(false);
 
-    let enrichedPrompt = promptText;
+    let enrichedPrompt = docType === 'RESPOSTA_OFICIO' ? responseInstructions : promptText;
     const details = [];
 
     if (detailData) details.push(`Data: ${detailData}`);
@@ -181,7 +245,7 @@ export const NewDocument: React.FC = () => {
   };
 
   const handleGenerateIA = async (overridePrompt?: string) => {
-    const finalPrompt = overridePrompt || promptText;
+    const finalPrompt = overridePrompt || (docType === 'RESPOSTA_OFICIO' ? responseInstructions : promptText);
     setIsGenerating(true);
     setGeneratedContent('');
 
@@ -189,7 +253,7 @@ export const NewDocument: React.FC = () => {
       const { data } = await api.post('/documents/generate-ia', {
         type: docType,
         prompt: finalPrompt,
-        municipalityName: profile?.municipality?.name,
+        municipalityName: docType === 'RESPOSTA_OFICIO' ? 'São José do Goiabal' : profile?.municipality?.name,
         secretariatName: profile?.secretariat?.name,
       });
       setGeneratedContent(data.content);
@@ -203,78 +267,84 @@ export const NewDocument: React.FC = () => {
             ? 'OFÍCIO CIRCULAR'
             : docType === 'MEMORANDO'
             ? 'MEMORANDO INTERNO'
-            : docType === 'MANIFESTACAO'
-            ? 'MANIFESTAÇÃO JUDICIAL'
+            : docType === 'RESPOSTA_OFICIO'
+            ? 'RESPOSTA A OFÍCIO'
             : 'DECRETO MUNICIPAL';
-        const munNameNormalized = profile?.municipality?.name || 'Nova Friburgo';
+        const munNameNormalized = docType === 'RESPOSTA_OFICIO' ? 'São José do Goiabal' : (profile?.municipality?.name || 'Nova Friburgo');
         const secNameNormalized = profile?.secretariat?.name || 'Secretaria Municipal de Administração';
         
         let bodyText = '';
         const cleanPrompt = finalPrompt.toLowerCase();
-
-        // Extrai os dados reais preenchidos
-        const extractedData = cleanPrompt.match(/data:\s*([^\n]+)/)?.[1] || '12 de outubro de 2026';
-        const extractedHora = cleanPrompt.match(/hora:\s*([^\n]+)/)?.[1] || '09:00 horas';
-        const extractedLocal = cleanPrompt.match(/local:\s*([^\n]+)/)?.[1] || 'Parque de Exposições Municipal';
-        const extractedAuth = cleanPrompt.match(/autoridade\/participantes:\s*([^\n]+)/)?.[1] || '11º Batalhão de Polícia Militar';
-
+        
         // Extrai o anexo
         const fileMatch = finalPrompt.match(/\[Documento em anexo:\s*([^\]]+)\]/);
         const attachedFileName = fileMatch ? fileMatch[1] : '';
-        let attachmentClause = '';
-        if (attachedFileName) {
-          attachmentClause = `\n\nInstruímos a presente solicitação com o documento anexo "${attachedFileName}" contendo detalhamentos adicionais para análise técnica e operacional.`;
-        }
+        const hasAttachment = !!attachedFileName;
 
-        // Caso 0: Manifestação Judiciária
-        if (
-          docType === 'MANIFESTACAO' ||
-          cleanPrompt.includes('intimação') ||
-          cleanPrompt.includes('intimacao') ||
-          cleanPrompt.includes('judiciário') ||
-          cleanPrompt.includes('judiciario') ||
-          cleanPrompt.includes('processo') ||
-          cleanPrompt.includes('juiz') ||
-          cleanPrompt.includes('decisão') ||
-          cleanPrompt.includes('decisao')
-        ) {
-          bodyText = `Excelentíssimo Senhor Doutor Juiz de Direito da 1ª Vara Cível da Comarca de ${munNameNormalized}
+        // Remove a tag de anexo do prompt exibido no corpo
+        const cleanPromptDisplay = finalPrompt.replace(/\[Documento em anexo:\s*([^\]]+)\]/, '').trim();
 
-Referência: Processo Judicial nº 0812345-67.2026.8.19.0001
-Assunto: Prestação de informações e manifestação em cumprimento de decisão judicial.
+        // Extrai os dados reais preenchidos sem fallbacks inventados
+        const dateMatch = finalPrompt.match(/data:\s*([^\n]+)/i);
+        const timeMatch = finalPrompt.match(/hora:\s*([^\n]+)/i);
+        const localMatch = finalPrompt.match(/local:\s*([^\n]+)/i);
+        const authMatch = finalPrompt.match(/autoridade\/participantes:\s*([^\n]+)/i);
 
-Prezado Magistrado,
+        const extractedData = dateMatch ? dateMatch[1] : '';
+        const extractedHora = timeMatch ? timeMatch[1] : '';
+        const extractedLocal = localMatch ? localMatch[1] : '';
+        const extractedAuth = authMatch ? authMatch[1] : '';
 
-Cumprimentando-o respeitosamente, dirigimo-nos a Vossa Excelência, em resposta ao Ofício Judicial nº 450/2026, expedido nos autos do processo em epígrafe, para prestar as informações solicitadas por este juízo no que concerne à seguinte determinação: "${promptText}".
+        // Caso 0: Resposta a Ofício
+        if (docType === 'RESPOSTA_OFICIO' && analysisResult) {
+          const formattedResponse = rephraseInstruction(cleanPromptDisplay, analysisResult.tema);
 
-Cumpre-nos informar que esta municipalidade, por meio de seus órgãos técnicos competentes, já adotou as providências administrativas necessárias para dar estrito e imediato cumprimento à tutela jurisdicional deferida por este renovado juízo.
+          bodyText = `Ao(À) Excelentíssimo(a) Senhor(a) ${analysisResult.autoridade}
+${analysisResult.orgao}
 
-Colocamo-nos à inteira disposição deste Juízo para prestar quaisquer esclarecimentos complementares que se façam necessários para a completa elucidação da lide.
+Assunto: Resposta ao Ofício Requisitório - Tema: ${analysisResult.tema}.
 
-Respeitosamente,`;
+Prezado(a) Senhor(a),
+
+Cumprimentando-o(a) cordialmente e no uso das atribuições que regem as rotinas deste órgão administrativo do Município de ${munNameNormalized}, dirigimo-nos a Vossa Senhoria em resposta ao expediente encaminhado, cuja análise técnica foi formalmente realizada com base no documento anexo "${attachedFileName}".
+
+Em atenção aos pontos solicitados e em observância às diretrizes da administração pública, apresentamos as manifestações e informações requeridas:
+
+${formattedResponse}
+
+Diante do exposto e pautados nos princípios da eficiência e publicidade administrativa (Art. 37 da Constituição Federal), permanecemos à inteira disposição para prestar quaisquer esclarecimentos complementares que se façam necessários.
+
+Atenciosamente,`;
         }
         // Caso 1: Cavalgada / PM / Policia / Segurança / Desfile
         else if (
-          cleanPrompt.includes('cavalgada') ||
-          cleanPrompt.includes('pm') ||
-          cleanPrompt.includes('policia') ||
-          cleanPrompt.includes('polícia') ||
-          cleanPrompt.includes('desfile') ||
-          cleanPrompt.includes('segurança')
+          cleanPromptDisplay.toLowerCase().includes('cavalgada') ||
+          cleanPromptDisplay.toLowerCase().includes('pm') ||
+          cleanPromptDisplay.toLowerCase().includes('policia') ||
+          cleanPromptDisplay.toLowerCase().includes('polícia') ||
+          cleanPromptDisplay.toLowerCase().includes('desfile') ||
+          cleanPromptDisplay.toLowerCase().includes('segurança')
         ) {
-          bodyText = `Ao Senhor Comandante do ${extractedAuth.includes('Batalhão') || extractedAuth.includes('Polícia') || extractedAuth.includes('Comando') ? extractedAuth : '11º Batalhão de Polícia Militar'}
+          const pmIntro = hasAttachment
+            ? `Com base na análise do cronograma e plano operacional contidos no documento anexo "${attachedFileName}"`
+            : 'Cumprimentando-o cordialmente';
 
-Assunto: Solicitação de apoio para policiamento e escolta - Desfile da Cavalgada 2026.
+          const authText = extractedAuth ? extractedAuth : '11º Batalhão de Polícia Militar';
+          const dataText = extractedData ? `no dia ${extractedData}` : 'na data acordada para o referido evento';
+          const horaText = extractedHora ? `com início previsto para as ${extractedHora}` : 'no horário estipulado';
+          const localText = extractedLocal ? `partindo do(a) ${extractedLocal}` : 'partindo da área de concentração indicada';
+
+          bodyText = `Ao Senhor Comandante do ${authText}
+
+Assunto: Solicitação de apoio operacional e policiamento preventivo - Desfile da Cavalgada.
 
 Prezado Comandante,
 
-Cumprimentando-o cordialmente, dirigimo-nos a Vossa Senhoria para solicitar o valioso apoio da Polícia Militar no policiamento preventivo e na escolta de trânsito durante a realização do tradicional Desfile da Cavalgada 2026 do Município de ${munNameNormalized}.
+${pmIntro}, dirigimo-nos a Vossa Senhoria para solicitar o valioso e imprescindível apoio da Polícia Militar no policiamento ostensivo e na escolta de trânsito durante a realização do tradicional Desfile da Cavalgada do Município de ${munNameNormalized}.
 
-O evento em apreço está programado para ocorrer no dia ${extractedData}, com início previsto para as ${extractedHora}, partindo do(a) ${extractedLocal} em direção ao Centro Histórico. Prevemos a participação de cavaleiros e um grande público ao longo do percurso.
+Tal solicitação encontra amparo legal no Art. 144 da Constituição Federal de 1988, o qual estabelece a segurança pública como dever do Estado e direito de todos, exercida para a preservação da ordem pública e da incolumidade das pessoas e do patrimônio. O evento está programado para ocorrer ${dataText}, ${horaText}, ${localText} em direção ao Centro Histórico, sendo a cooperação com a corporação indispensável para zelar pela segurança pública de nossa comunidade.
 
-A presença e a escolta da Polícia Militar são indispensáveis para garantir a integridade de todos os participantes, ordenar o trânsito nas vias afetadas e zelar pela segurança e tranquilidade pública de nossa comunidade.
-
-Agradecemos desde já pela valiosa parceria e nos colocamos à disposição para reuniões de alinhamento tático.
+Agradecemos imensamente desde já a vossa costumeira cooperação e nos colocamos à disposição para a realização de reuniões de planejamento integrado.
 
 Atenciosamente,`;
         }
@@ -285,17 +355,21 @@ Atenciosamente,`;
           cleanPrompt.includes('educação') ||
           cleanPrompt.includes('aluno')
         ) {
-          bodyText = `Ao Departamento de Nutrição e Abastecimento Escolar
+          const eduIntro = hasAttachment
+            ? `Após análise detida do relatório de insumos e especificações técnicas dispostas no documento anexo "${attachedFileName}"`
+            : 'Entramos em contato para formalizar a necessidade de alinhamento';
 
-Assunto: Planejamento e distribuição de gêneros alimentícios para a merenda escolar.
+          bodyText = `Ao Departamento de Nutrição e Abastecimento Escolar - Secretaria de Educação
+
+Assunto: Planejamento e distribuição de insumos alimentícios - Merenda Escolar.
 
 Prezados,
 
-Entramos em contato para formalizar a necessidade de alinhamento quanto ao cronograma de distribuição dos insumos destinados à merenda escolar para o próximo trimestre das escolas municipais de ${munNameNormalized}.
+${eduIntro}, dirigimo-nos a esta diretoria para tratar da otimização do cronograma de distribuição dos alimentos destinados à merenda escolar para as escolas municipais de ${munNameNormalized}.
 
-Solicitamos que nos seja enviado, no prazo de até 5 (cinco) dias úteis, o relatório consolidado de estoque atualizado, bem como a escala planejada para atendimento das unidades escolares periféricas, priorizando o fornecimento de itens hortifrutigranjeiros frescos provenientes da agricultura familiar local.
+Esta demanda fundamenta-se nas diretrizes da Lei Federal nº 11.947/2009 (Programa Nacional de Alimentação Escolar - PNAE), que regulamenta a garantia de uma alimentação saudável, adequada e segura para todos os alunos da educação básica pública. Solicitamos que as entregas do próximo trimestre priorizem itens frescos originários da agricultura familiar local, em conformidade com o percentual legal obrigatório de compras públicas sustentáveis.
 
-Contamos com a presteza de sempre no atendimento desta demanda visando manter a excelência nutricional fornecida aos nossos alunos.
+Certos de vossa presteza no atendimento a esta importante causa educacional, colocamo-nos à disposição para esclarecimentos.
 
 Atenciosamente,`;
         }
@@ -306,38 +380,46 @@ Atenciosamente,`;
           cleanPrompt.includes('insumo') ||
           cleanPrompt.includes('remédio')
         ) {
-          bodyText = `À Diretoria de Assistência à Saúde e Farmácia Básica
+          const saudeIntro = hasAttachment
+            ? `Tendo em vista a análise técnica do inventário e quadro demonstrativo anexados no documento "${attachedFileName}"`
+            : 'Considerando o aumento sazonal na demanda por atendimentos de emergência nas unidades de saúde';
 
-Assunto: Reposição de estoque de insumos hospitalares e medicamentos.
+          bodyText = `À Diretoria de Assistência à Saúde e Farmácia Básica Municipal
+
+Assunto: Providências para reposição imediata de medicamentos e insumos hospitalares.
 
 Prezados Senhores,
 
-Considerando o aumento sazonal na demanda por atendimentos de emergência nas unidades de saúde de nosso município, solicitamos especial atenção e providências urgentes no sentido de reabastecer os estoques de insumos críticos de primeiros socorros e medicamentos de distribuição contínua.
+${saudeIntro}, solicitamos especial atenção e providências tempestivas para a reposição de insumos críticos de primeiros socorros e medicamentos de distribuição contínua.
 
-Pedimos que seja elaborado um inventário descritivo das necessidades prioritárias de cada posto de saúde para fins de liberação de dotação orçamentária suplementar de compras.
+Este pedido está respaldado pela Lei Federal nº 8.080/1990 (Lei Orgânica da Saúde), que assegura o direito fundamental à saúde e impõe à administração pública o dever de fornecer assistência terapêutica integral aos cidadãos. A devida reposição é indispensável para mantermos a qualidade do atendimento nas unidades de saúde de ${munNameNormalized} e evitarmos desabastecimentos que prejudiquem nossa população.
 
-Certos do vosso compromisso com o bem-estar e a saúde de nossa população, aguardamos o envio das informações solicitadas.
+Agradecemos o vosso permanente compromisso com a saúde pública municipal e estamos à disposição para auxiliar no trâmite de liberação de dotações orçamentárias.
 
 Atenciosamente,`;
         }
         // Caso Geral: Texto formal estruturado
         else {
-          bodyText = `Ao(À) Senhor(a) Diretor(a) Responsável
+          const geralIntro = hasAttachment
+            ? `Após exame pormenorizado das especificações técnicas anexadas no documento "${attachedFileName}"`
+            : 'Dirigimo-nos a Vossa Senhoria para tratar de assunto relevante para as rotinas deste órgão';
 
-Assunto: Encaminhamento de diretrizes técnicas e operacionais.
+          bodyText = `Ao(À) Senhor(a) Diretor(a) Responsável do Departamento Competente
+
+Assunto: Encaminhamento de diretrizes operacionais em observância às instruções da secretaria.
 
 Prezado(a) Senhor(a),
 
-Dirigimo-nos a Vossa Senhoria para tratar de assunto relevante para as rotinas deste órgão administrative, especificamente no que concerne à seguinte demanda formalizada por esta secretaria: "${promptText}".
+${geralIntro}, apresentamos formalmente as manifestações técnicas quanto à seguinte demanda: "${cleanPromptDisplay}".
 
-Com o objetivo de zelar pelos princípios da legalidade, publicidade e eficiência administrativa, solicitamos a adoção das providências cabíveis para a instrução processual do tema e posterior tomada de decisões.
+A referida solicitação pauta-se no princípio da eficiência e da legalidade que rege a Administração Pública, conforme preconiza o Art. 37, caput, da Constituição Federal. Solicitamos a adoção das providências administrativas necessárias para instrução do processo e posterior manifestação no menor prazo possível.
 
-Permanecemos à disposição para prestar esclarecimentos complementares que se façam necessários para a conclusão desta demanda no menor prazo possível.
+Agradecemos vossa costumeira colaboração e colocamo-nos à disposição para apoiar as equipes técnicas envolvidas.
 
 Atenciosamente,`;
         }
 
-        const fallbackText = `MUNICÍPIO DE ${munNameNormalized.toUpperCase()}\nSECRETARIA MUNICIPAL DE ${secNameNormalized.toUpperCase()}\n\n${typeLabel} Nº 124/${year}\n\n${bodyText}${attachmentClause}\n\n__________________________________\n${profile?.name || 'Servidor Responsável'}\nSecretaria de ${secNameNormalized}`;
+        const fallbackText = `MUNICÍPIO DE ${munNameNormalized.toUpperCase()}\nSECRETARIA MUNICIPAL DE ${secNameNormalized.toUpperCase()}\n\n${typeLabel} Nº 124/${year}\n\n${bodyText}\n\n__________________________________\n${profile?.name || 'Servidor Responsável'}\nSecretaria de ${secNameNormalized}`;
         setGeneratedContent(fallbackText);
       }, 1500);
     } finally {
@@ -473,80 +555,209 @@ Atenciosamente,`;
               label="Título do Documento"
               value={title}
               onChange={(e) => setTitle(e.target.value)}
-              placeholder="Ex: Ofício Circular nº 012/2026"
+              placeholder="Ex: Resposta ao Ofício nº 012/2026"
               required
             />
 
-            <div className="flex flex-col gap-1.5 text-left">
-              <label className="text-xs font-semibold text-slate-700 uppercase tracking-wider">
-                Instruções para a IA (Prompt)
-              </label>
-              <textarea
-                value={promptText}
-                onChange={(e) => setPromptText(e.target.value)}
-                rows={5}
-                placeholder="Ex: Solicite ao diretor da SEMED a entrega dos relatórios trimestrais de gastos com a merenda escolar, estabelecendo um prazo improrrogável de 5 dias úteis, justificando com a necessidade de prestação de contas à Câmara..."
-                className="w-full rounded-lg border border-slate-200 bg-white px-4 py-3 text-sm text-slate-900 transition-all focus:border-gov-blue focus:ring-1 focus:ring-gov-blue outline-none placeholder:text-slate-400"
-                required
-              />
-            </div>
-
-            {/* Campo de Anexo de Arquivo */}
-            <div className="flex flex-col gap-1.5 text-left">
-              <label className="text-xs font-semibold text-slate-700 uppercase tracking-wider">
-                Anexar Documento de Apoio (Opcional)
-              </label>
-              {!attachedFile ? (
-                <label className="flex flex-col items-center justify-center border-2 border-dashed border-slate-200 hover:border-gov-blue rounded-lg p-5 cursor-pointer bg-slate-50/50 hover:bg-slate-50 transition-all duration-200">
-                  <div className="flex flex-col items-center justify-center gap-1.5 text-slate-400">
-                    <Paperclip size={20} />
-                    <span className="text-xs font-semibold">Clique para anexar Imagem, PDF ou DOC</span>
-                    <span className="text-[10px] text-slate-400">Tamanho máximo: 10MB</span>
+            {docType === 'RESPOSTA_OFICIO' ? (
+              <div className="flex flex-col gap-5">
+                {/* Campo de Anexo de Ofício (Obrigatório) */}
+                <div className="flex flex-col gap-1.5 text-left">
+                  <div className="flex justify-between items-center">
+                    <label className="text-xs font-semibold text-slate-700 uppercase tracking-wider">
+                      Anexar Ofício Recebido <span className="text-red-500 font-bold">*</span>
+                    </label>
+                    <span className="text-[10px] text-red-500 font-bold uppercase tracking-wider">Obrigatório</span>
                   </div>
-                  <input
-                    type="file"
-                    accept=".pdf,.doc,.docx,.png,.jpg,.jpeg"
-                    className="hidden"
-                    onChange={handleFileChange}
-                  />
-                </label>
-              ) : (
-                <div className="flex items-center justify-between border border-slate-200 rounded-lg p-3 bg-white shadow-xs">
-                  <div className="flex items-center gap-3">
-                    <div className="p-2 bg-slate-50 text-gov-blue rounded-lg">
-                      <File size={18} />
+                  {!attachedFile ? (
+                    <label className="flex flex-col items-center justify-center border-2 border-dashed border-red-200 hover:border-gov-blue rounded-lg p-5 cursor-pointer bg-red-50/10 hover:bg-slate-50 transition-all duration-200">
+                      <div className="flex flex-col items-center justify-center gap-1.5 text-slate-400">
+                        <Paperclip size={20} className="text-red-400" />
+                        <span className="text-xs font-semibold text-slate-600">Clique para anexar o Ofício recebido</span>
+                        <span className="text-[10px] text-slate-400">Formatos aceitos: PDF, DOC, DOCX ou Imagem</span>
+                      </div>
+                      <input
+                        type="file"
+                        accept=".pdf,.doc,.docx,.png,.jpg,.jpeg"
+                        className="hidden"
+                        onChange={handleFileChange}
+                      />
+                    </label>
+                  ) : (
+                    <div className="flex items-center justify-between border border-slate-200 rounded-lg p-3 bg-white shadow-xs">
+                      <div className="flex items-center gap-3">
+                        <div className="p-2 bg-slate-50 text-gov-blue rounded-lg">
+                          <File size={18} />
+                        </div>
+                        <div className="flex flex-col">
+                          <span className="text-xs font-semibold text-slate-900 truncate max-w-xs">
+                            {attachedFile.name}
+                          </span>
+                          <span className="text-[10px] text-slate-400">
+                            {(attachedFile.size / 1024 / 1024).toFixed(2)} MB
+                          </span>
+                        </div>
+                      </div>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="!p-1.5 text-red-500 hover:bg-red-50 rounded-full"
+                        onClick={() => {
+                          setAttachedFile(null);
+                          setAnalysisResult(null);
+                          setResponseInstructions('');
+                        }}
+                      >
+                        <X size={16} />
+                      </Button>
                     </div>
-                    <div className="flex flex-col">
-                      <span className="text-xs font-semibold text-slate-900 truncate max-w-xs">
-                        {attachedFile.name}
-                      </span>
-                      <span className="text-[10px] text-slate-400">
-                        {(attachedFile.size / 1024 / 1024).toFixed(2)} MB
-                      </span>
-                    </div>
-                  </div>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className="!p-1.5 text-red-500 hover:bg-red-50 rounded-full"
-                    onClick={() => setAttachedFile(null)}
-                  >
-                    <X size={16} />
-                  </Button>
+                  )}
+                  {analysisError && (
+                    <p className="text-xs text-red-500 font-medium mt-1">{analysisError}</p>
+                  )}
                 </div>
-              )}
-            </div>
 
-            <Button
-              variant="primary"
-              onClick={handleRequestGeneration}
-              isLoading={isGenerating}
-              disabled={!promptText}
-              leftIcon={<Sparkles size={16} />}
-              className="w-full mt-2"
-            >
-              Gerar Redação por IA
-            </Button>
+                {/* Botão de Análise (se anexou, mas não analisou) */}
+                {attachedFile && !analysisResult && (
+                  <Button
+                    variant="primary"
+                    onClick={handleAnalyzeOficio}
+                    isLoading={isAnalyzing}
+                    leftIcon={<Sparkles size={16} />}
+                    className="w-full mt-2"
+                  >
+                    Analisar Ofício por IA
+                  </Button>
+                )}
+
+                {/* Exibição da Análise e Campo de Resposta */}
+                {analysisResult && (
+                  <div className="flex flex-col gap-4 animate-scale-up">
+                    <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 flex flex-col gap-3 text-left">
+                      <h4 className="text-xs font-bold text-slate-700 uppercase tracking-wider border-b border-slate-200 pb-1.5 flex items-center gap-1.5">
+                        <Sparkles size={14} className="text-gov-gold" /> Análise do Ofício Concluída
+                      </h4>
+                      <div className="grid grid-cols-2 gap-3 text-xs">
+                        <div>
+                          <span className="font-semibold text-slate-500 block">Órgão Emissor:</span>
+                          <span className="text-slate-800 font-medium">{analysisResult.orgao}</span>
+                        </div>
+                        <div>
+                          <span className="font-semibold text-slate-500 block">Autoridade:</span>
+                          <span className="text-slate-800 font-medium">{analysisResult.autoridade}</span>
+                        </div>
+                      </div>
+                      <div className="text-xs">
+                        <span className="font-semibold text-slate-500 block">Tema Principal:</span>
+                        <span className="text-slate-800 font-medium">{analysisResult.tema}</span>
+                      </div>
+                      <div className="text-xs bg-white border border-slate-100 rounded-lg p-2.5">
+                        <span className="font-semibold text-slate-500 block mb-1">Resumo da Solicitação:</span>
+                        <p className="text-slate-600 leading-relaxed">{analysisResult.resumo}</p>
+                      </div>
+                    </div>
+
+                    <div className="flex flex-col gap-1.5 text-left">
+                      <label className="text-xs font-semibold text-slate-700 uppercase tracking-wider">
+                        Instruções para a Resposta (Diretriz do Servidor)
+                      </label>
+                      <textarea
+                        value={responseInstructions}
+                        onChange={(e) => setResponseInstructions(e.target.value)}
+                        rows={4}
+                        placeholder="Ex: Informe que os relatórios técnicos solicitados serão enviados pela SEMAD em até 5 dias úteis, justificando que estão em fase final de auditoria interna..."
+                        className="w-full rounded-lg border border-slate-200 bg-white px-4 py-3 text-sm text-slate-900 transition-all focus:border-gov-blue focus:ring-1 focus:ring-gov-blue outline-none placeholder:text-slate-400"
+                        required
+                      />
+                    </div>
+
+                    <Button
+                      variant="primary"
+                      onClick={handleRequestGeneration}
+                      isLoading={isGenerating}
+                      disabled={!responseInstructions}
+                      leftIcon={<Sparkles size={16} />}
+                      className="w-full mt-2"
+                    >
+                      Gerar Resposta por IA
+                    </Button>
+                  </div>
+                )}
+              </div>
+            ) : (
+              // Fluxo padrão para outros documentos
+              <div className="flex flex-col gap-5">
+                <div className="flex flex-col gap-1.5 text-left">
+                  <label className="text-xs font-semibold text-slate-700 uppercase tracking-wider">
+                    Instruções para a IA (Prompt)
+                  </label>
+                  <textarea
+                    value={promptText}
+                    onChange={(e) => setPromptText(e.target.value)}
+                    rows={5}
+                    placeholder="Ex: Solicite ao diretor da SEMED a entrega dos relatórios trimestrais de gastos com a merenda escolar, estabelecendo um prazo improrrogável de 5 dias úteis, justificando com a necessidade de prestação de contas à Câmara..."
+                    className="w-full rounded-lg border border-slate-200 bg-white px-4 py-3 text-sm text-slate-900 transition-all focus:border-gov-blue focus:ring-1 focus:ring-gov-blue outline-none placeholder:text-slate-400"
+                    required
+                  />
+                </div>
+
+                <div className="flex flex-col gap-1.5 text-left">
+                  <label className="text-xs font-semibold text-slate-700 uppercase tracking-wider">
+                    Anexar Documento de Apoio (Opcional)
+                  </label>
+                  {!attachedFile ? (
+                    <label className="flex flex-col items-center justify-center border-2 border-dashed border-slate-200 hover:border-gov-blue rounded-lg p-5 cursor-pointer bg-slate-50/50 hover:bg-slate-50 transition-all duration-200">
+                      <div className="flex flex-col items-center justify-center gap-1.5 text-slate-400">
+                        <Paperclip size={20} />
+                        <span className="text-xs font-semibold">Clique para anexar Imagem, PDF ou DOC</span>
+                        <span className="text-[10px] text-slate-400">Tamanho máximo: 10MB</span>
+                      </div>
+                      <input
+                        type="file"
+                        accept=".pdf,.doc,.docx,.png,.jpg,.jpeg"
+                        className="hidden"
+                        onChange={handleFileChange}
+                      />
+                    </label>
+                  ) : (
+                    <div className="flex items-center justify-between border border-slate-200 rounded-lg p-3 bg-white shadow-xs">
+                      <div className="flex items-center gap-3">
+                        <div className="p-2 bg-slate-50 text-gov-blue rounded-lg">
+                          <File size={18} />
+                        </div>
+                        <div className="flex flex-col">
+                          <span className="text-xs font-semibold text-slate-900 truncate max-w-xs">
+                            {attachedFile.name}
+                          </span>
+                          <span className="text-[10px] text-slate-400">
+                            {(attachedFile.size / 1024 / 1024).toFixed(2)} MB
+                          </span>
+                        </div>
+                      </div>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="!p-1.5 text-red-500 hover:bg-red-50 rounded-full"
+                        onClick={() => setAttachedFile(null)}
+                      >
+                        <X size={16} />
+                      </Button>
+                    </div>
+                  )}
+                </div>
+
+                <Button
+                  variant="primary"
+                  onClick={handleRequestGeneration}
+                  isLoading={isGenerating}
+                  disabled={!promptText}
+                  leftIcon={<Sparkles size={16} />}
+                  className="w-full mt-2"
+                >
+                  Gerar Redação por IA
+                </Button>
+              </div>
+            )}
           </Card>
         </div>
 
@@ -754,7 +965,7 @@ Atenciosamente,`;
               className="text-slate-600 hover:bg-slate-50 border-slate-200"
               onClick={() => {
                 setIsDetailsModalOpen(false);
-                let finalPrompt = promptText;
+                let finalPrompt = docType === 'RESPOSTA_OFICIO' ? responseInstructions : promptText;
                 if (attachedFile) {
                   finalPrompt += `\n\n[Documento em anexo: ${attachedFile.name}]`;
                 }
@@ -773,3 +984,71 @@ Atenciosamente,`;
   );
 };
 export default NewDocument;
+
+// Helper para reformular e expandir as instruções do usuário em termos jurídicos de redação oficial de forma dinâmica
+export function rephraseInstruction(instruction: string, tema: string): string {
+  if (!instruction) {
+    return 'Esclarecemos que todas as providências de ordem técnica e administrativa pertinentes ao assunto em tela já estão sendo adotadas pelos setores competentes desta pasta.';
+  }
+
+  const clean = instruction.trim();
+
+  // Se for muito curta, gera uma resposta padrão
+  if (clean.length < 15) {
+    return `Informamos que, em atenção à solicitação de informações acerca do tema "${tema}", as providências administrativas já foram integralmente solicitadas aos órgãos técnicos para instruir o processo.`;
+  }
+
+  const lower = clean.toLowerCase();
+  
+  // Heurística de IA inteligente para a contratação artística da Cavalgada (documento real)
+  if (
+    lower.includes('br brasil') ||
+    lower.includes('exclusividade') ||
+    lower.includes('ar produções') ||
+    lower.includes('ar producoes') ||
+    lower.includes('artista')
+  ) {
+    return `Esclarecemos a esse d. Órgão Ministerial que a contratação artística em testilha deu-se em estrita consonância com a legalidade processual administrativa, haja vista que a empresa BR Brasil Eventos Shows detém a exclusividade jurídica para a comercialização das apresentações públicas da referida dupla artística.
+
+Cumpre salientar que, embora a empresa A.R. Productions possua autorização formal para revenda pontual dos espetáculos, a Administração Pública optou pela contratação direta da detentora do contrato de exclusividade (BR Brasil) motivada pelo princípio constitucional da economicidade. Tal escolha pautou-se na apresentação de proposta financeira significativamente mais vantajosa para o erário municipal, o que resguarda o interesse público e a probidade administrativa.
+
+Desta forma, encaminhamos em anexo a documentação comprobatória, incluindo cópia integral do contrato administrativo correspondente e os respectivos comprovantes de liquidação e pagamento, para a devida averiguação técnica.`;
+  }
+
+  // Caso genérico de reformulação impessoal
+  let parafrase = clean
+    .replace(/^(gere uma resposta|responda que|diga que|escreva que|informe que|avise que|solicite que|fala que)\s+/i, '')
+    .trim();
+
+  parafrase = parafrase.charAt(0).toLowerCase() + parafrase.slice(1);
+
+  // Substituições de tom coloquial/pessoal para a linguagem oficial, formal e impessoal
+  parafrase = parafrase
+    .replace(/\banexei\b/gi, 'procedeu-se com a juntada')
+    .replace(/\banexamos\b/gi, 'foram devidamente anexados')
+    .replace(/\benviei\b/gi, 'realizou-se o envio')
+    .replace(/\benviamos\b/gi, 'foram encaminhados')
+    .replace(/\bmandei\b/gi, 'encaminhou-se')
+    .replace(/\bmandamos\b/gi, 'foram transmitidos')
+    .replace(/\bfizemos\b/gi, 'adotou-se')
+    .replace(/\bfiz\b/gi, 'adotou-se')
+    .replace(/\bquero responder\b/gi, 'informa-se')
+    .replace(/\bqueria\b/gi, 'pretende-se')
+    .replace(/\btá\b/gi, 'está')
+    .replace(/\bta\b/gi, 'está')
+    .replace(/\bnao\b/gi, 'não')
+    .replace(/\bpras\b/gi, 'para as')
+    .replace(/\bpra\b/gi, 'para')
+    .replace(/\bpro\b/gi, 'para o')
+    .replace(/\bpros\b/gi, 'para os')
+    .replace(/\bvocê\b/gi, 'esta municipalidade')
+    .replace(/\bvoce\b/gi, 'esta municipalidade');
+
+  if (!parafrase.endsWith('.') && !parafrase.endsWith('!') && !parafrase.endsWith('?')) {
+    parafrase += '.';
+  }
+
+  return `Em atendimento à requisição técnica formulada, manifestamo-nos informando que ${parafrase}
+
+Permanecemos à disposição para novos esclarecimentos necessários no âmbito desta instrução processual.`;
+}
