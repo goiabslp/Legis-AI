@@ -16,3 +16,57 @@ body {
   background-color: #f8fafc; /* slate-50 */
   color: #0f172a; /* slate-900 */
 }
+
+/* Classes para alternância de visibilidade entre tela e impressão */
+@media screen {
+  .print-only, .print-footer-fixed {
+    display: none !important;
+  }
+}
+
+@media print {
+  .screen-only {
+    display: none !important;
+  }
+  .print-only {
+    display: block !important;
+  }
+  .print-footer-fixed {
+    display: flex !important;
+    position: fixed !important;
+    bottom: 0px !important;
+    left: 40px !important;
+    right: 40px !important;
+    height: 50px !important;
+    background-color: white !important;
+    z-index: 9999 !important;
+  }
+  .print-footer-fixed * {
+    visibility: visible !important;
+  }
+
+  /* Oculta toda a interface e elementos do sistema */
+  body * {
+    visibility: hidden;
+  }
+  /* Exibe exclusivamente a folha do documento oficial e o rodapé fixado */
+  .printable-area, .printable-area *, .print-footer-fixed, .print-footer-fixed * {
+    visibility: visible !important;
+  }
+  /* Posiciona e formata a folha timbrada para ocupar a folha A4 completa na impressão */
+  .printable-area {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 100%;
+    margin: 0;
+    padding: 0px 40px;
+    border: none !important;
+    box-shadow: none !important;
+    background: white !important;
+  }
+  /* Remove a barra decorativa azul do topo na impressão */
+  .printable-area > .absolute {
+    display: none !important;
+  }
+}

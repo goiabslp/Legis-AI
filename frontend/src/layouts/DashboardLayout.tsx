@@ -57,9 +57,9 @@ export const DashboardLayout: React.FC<{ children: React.ReactNode }> = ({ child
         <div className="flex flex-col gap-8">
           {/* Logo / Município */}
           <div className="flex items-center gap-3 px-2">
-            {profile?.municipality?.logoUrl ? (
+            {localStorage.getItem('mun_logo_base64') || profile?.municipality?.logoUrl ? (
               <img
-                src={profile.municipality.logoUrl}
+                src={localStorage.getItem('mun_logo_base64') || profile?.municipality?.logoUrl || ''}
                 alt="Brasão"
                 className="w-10 h-10 object-contain rounded-md bg-white/10 p-1"
               />

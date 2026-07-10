@@ -29,6 +29,9 @@ export const NewDocument: React.FC = () => {
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
   const { profile } = useAuth();
+  
+  const customLogo = localStorage.getItem('mun_logo_base64') || profile?.municipality?.logoUrl;
+  const customWatermark = localStorage.getItem('mun_watermark_base64');
 
   // Estados do formulário
   const [title, setTitle] = useState('');
@@ -767,89 +770,178 @@ Atenciosamente,`;
             Pré-visualização do Documento Oficial (Papel Timbrado)
           </h3>
 
-          <div className="bg-white border border-slate-200 rounded-xl shadow-md p-10 min-h-[600px] flex flex-col text-left font-serif leading-relaxed text-slate-800 relative printable-area">
+          <div className="bg-white border border-slate-200 rounded-xl shadow-md p-10 min-h-[600px] flex flex-col text-left font-serif leading-relaxed text-slate-800 relative printable-area overflow-hidden">
             {/* Linha colorida do governo */}
-            <div className="absolute top-0 left-0 right-0 h-1.5 bg-gov-blue rounded-t-xl" />
+            <div className="absolute top-0 left-0 right-0 h-1.5 bg-gov-blue rounded-t-xl screen-only" />
 
-            {/* Timbre do Município */}
-            <div className="flex flex-col items-center text-center pb-8 border-b border-slate-100 font-sans">
-              {profile?.municipality?.logoUrl ? (
+            {/* Marca d'água no fundo do documento (centralizada e discreta na tela) */}
+            {customWatermark && (
+              <div className="absolute inset-0 flex items-center justify-center pointer-events-none opacity-[0.05] select-none z-0 screen-only">
                 <img
-                  src={profile.municipality.logoUrl}
-                  alt="Brasão do Município"
-                  className="w-16 h-16 object-contain mb-3"
+                  src={customWatermark}
+                  alt="Marca d'água oficial"
+                  className="w-[320px] h-[320px] object-contain"
                 />
-              ) : (
-                <div className="w-14 h-14 rounded-full bg-slate-100 flex items-center justify-center font-bold text-gov-blue border border-slate-200 mb-3">
-                  BRASÃO
-                </div>
-              )}
-              <h2 className="text-sm font-extrabold tracking-wider uppercase text-slate-900 leading-none">
-                ESTADO DO RIO DE JANEIRO
-              </h2>
-              <h3 className="text-xs font-bold text-slate-700 uppercase mt-1 leading-none">
-                {profile?.municipality?.name || 'Prefeitura Municipal Exemplo'}
-              </h3>
-              <p className="text-[10px] text-slate-400 uppercase font-semibold mt-1">
-                {profile?.secretariat?.name || 'Secretaria Geral de Administração'}
-              </p>
-            </div>
+              </div>
+            )}
 
-            {/* Conteúdo dinâmico do documento */}
-            <div className="flex-1 mt-8 whitespace-pre-wrap text-sm text-slate-800">
-              {isGenerating ? (
-                <div className="flex flex-col items-center justify-center py-20 gap-4">
-                  <svg
-                    className="animate-spin h-8 w-8 text-gov-blue"
-                    xmlns="http://www.w3.org/2000/svg"
-                    fill="none"
-                    viewBox="0 0 24 24"
-                  >
-                    <circle
-                      className="opacity-25"
-                      cx="12"
-                      cy="12"
-                      r="10"
-                      stroke="currentColor"
-                      strokeWidth="4"
-                    />
-                    <path
-                      className="opacity-75"
-                      fill="currentColor"
-                      d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
-                    />
-                  </svg>
-                  <p className="text-xs font-semibold text-slate-400 font-sans">
-                    Redigindo fundamentação legal e estruturando texto...
-                  </p>
-                </div>
-              ) : generatedContent ? (
-                <textarea
-                  value={generatedContent}
-                  onChange={(e) => setGeneratedContent(e.target.value)}
-                  className="w-full h-full min-h-[400px] border-0 p-0 focus:ring-0 resize-none font-serif text-sm leading-relaxed text-slate-800 outline-none focus:outline-none"
-                />
-              ) : (
-                <div className="text-center py-24 text-slate-400 font-sans flex flex-col items-center justify-center gap-3">
-                  <AlertCircle size={28} className="text-slate-300" />
-                  <p className="text-sm max-w-xs">
-                    Insira os parâmetros ao lado e solicite a redação para preencher o documento oficial.
-                  </p>
-                </div>
-              )}
-            </div>
+            {/* Regras CSS dinâmicas para repetir a marca d'água em todas as páginas do PDF impresso */}
+            {customWatermark && (
+              <style>
+                {`
+                  @media print {
+                    body::before {
+                      content: "" !important;
+                      position: fixed !important;
+                      top: 0 !important;
+                      left: 0 !important;
+                      right: 0 !important;
+                      bottom: 0 !important;
+                      background-image: url("${customWatermark}") !important;
+                      background-position: center center !important;
+                      background-repeat: no-repeat !important;
+                      background-size: 320px 320px !important;
+                      opacity: 0.05 !important;
+                      pointer-events: none !important;
+                      z-index: -1000 !important;
+                      -webkit-print-color-adjust: exact !important;
+                      print-color-adjust: exact !important;
+                    }
+                    .printable-area {
+                      background: transparent !important;
+                      background-color: transparent !important;
+                      padding: 0 !important;
+                      border: none !important;
+                      box-shadow: none !important;
+                    }
+                  }
+                `}
+              </style>
+            )}
 
-            {/* Rodapé da folha timbrada */}
-            <div className="border-t border-slate-100 pt-4 mt-8 flex flex-col font-sans items-center text-center">
-              <span className="text-[10px] text-slate-400">
-                Página 1 de 1 • Gerado com auxílio de Inteligência Artificial Oficial do Município
-              </span>
-              {documentStatus === 'ASSINADO' && (
-                <span className="text-[10px] text-green-700 font-bold mt-1 flex items-center gap-1">
-                  <CheckCircle size={10} /> Assinado Digitalmente • Validade Jurídica Simbolizada
+            {/* LAYOUT DE TELA (screen-only) */}
+            <div className="screen-only flex flex-col flex-1 w-full">
+              {/* Timbre do Município */}
+              <div className="flex flex-col items-center text-center pb-4 border-b border-slate-100 font-sans relative z-10">
+                {customLogo ? (
+                  <img
+                    src={customLogo}
+                    alt="Brasão do Município"
+                    className="w-48 object-contain"
+                  />
+                ) : (
+                  <div className="w-28 h-28 rounded-full bg-slate-100 flex items-center justify-center font-bold text-gov-blue border border-slate-200 text-sm">
+                    BRASÃO
+                  </div>
+                )}
+                <h3 className="text-xs font-bold text-slate-700 uppercase mt-5 leading-none">
+                  {docType === 'RESPOSTA_OFICIO' ? 'Prefeitura Municipal de São José do Goiabal' : (profile?.municipality?.name || 'Prefeitura Municipal Exemplo')}
+                </h3>
+              </div>
+
+              {/* Conteúdo dinâmico do documento */}
+              <div className="flex-1 mt-8 whitespace-pre-wrap text-sm text-slate-800 relative z-10">
+                {isGenerating ? (
+                  <div className="flex flex-col items-center justify-center py-20 gap-4">
+                    <svg
+                      className="animate-spin h-8 w-8 text-gov-blue"
+                      xmlns="http://www.w3.org/2000/svg"
+                      fill="none"
+                      viewBox="0 0 24 24"
+                    >
+                      <circle
+                        className="opacity-25"
+                        cx="12"
+                        cy="12"
+                        r="10"
+                        stroke="currentColor"
+                        strokeWidth="4"
+                      />
+                      <path
+                        className="opacity-75"
+                        fill="currentColor"
+                        d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+                      />
+                    </svg>
+                    <p className="text-xs font-semibold text-slate-400 font-sans">
+                      Redigindo fundamentação legal e estruturando texto...
+                    </p>
+                  </div>
+                ) : generatedContent ? (
+                  <textarea
+                    value={generatedContent}
+                    onChange={(e) => setGeneratedContent(e.target.value)}
+                    className="w-full h-full min-h-[400px] border-0 p-0 focus:ring-0 resize-none font-serif text-sm leading-relaxed text-slate-800 outline-none focus:outline-none"
+                  />
+                ) : (
+                  <div className="text-center py-24 text-slate-400 font-sans flex flex-col items-center justify-center gap-3">
+                    <AlertCircle size={28} className="text-slate-300" />
+                    <p className="text-sm max-w-xs">
+                      Insira os parâmetros ao lado e solicite a redação para preencher o documento oficial.
+                    </p>
+                  </div>
+                )}
+              </div>
+
+              {/* Rodapé Padrão da folha timbrada */}
+              <div className="border-t border-slate-100 pt-4 mt-8 flex flex-col font-sans items-center text-center relative z-10">
+                <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">
+                  {docType === 'RESPOSTA_OFICIO' ? 'Prefeitura Municipal de São José do Goiabal' : (profile?.municipality?.name || 'Prefeitura Municipal Exemplo')}
                 </span>
-              )}
+                <span className="text-[9px] text-slate-400 mt-0.5">
+                  {docType === 'RESPOSTA_OFICIO' ? 'CNPJ: 18.293.475/0001-90' : (profile?.municipality?.cnpj ? `CNPJ: ${profile.municipality.cnpj}` : 'CNPJ: 29.115.485/0001-20')}
+                </span>
+                {documentStatus === 'ASSINADO' && (
+                  <span className="text-[9px] text-green-700 font-bold mt-2 flex items-center gap-1">
+                    <CheckCircle size={10} /> Assinado Digitalmente • Validade Jurídica Simbolizada
+                  </span>
+                )}
+              </div>
             </div>
+
+            {/* LAYOUT DE IMPRESSÃO (print-only) */}
+            <table className="print-only w-full border-collapse bg-transparent text-left font-serif leading-relaxed text-slate-800 relative z-10">
+              <thead>
+                <tr>
+                  <td>
+                    <div className="flex flex-col items-center text-center pb-4 border-b border-slate-100 font-sans">
+                      {customLogo ? (
+                        <img
+                          src={customLogo}
+                          alt="Brasão do Município"
+                          className="w-48 object-contain"
+                        />
+                      ) : (
+                        <div className="w-28 h-28 rounded-full bg-slate-100 flex items-center justify-center font-bold text-gov-blue border border-slate-200 text-sm">
+                          BRASÃO
+                        </div>
+                      )}
+                      <h3 className="text-xs font-bold text-slate-700 uppercase mt-5 leading-none">
+                        {docType === 'RESPOSTA_OFICIO' ? 'Prefeitura Municipal de São José do Goiabal' : (profile?.municipality?.name || 'Prefeitura Municipal Exemplo')}
+                      </h3>
+                    </div>
+                  </td>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>
+                    <div className="whitespace-pre-wrap text-sm leading-relaxed text-slate-800 pt-6">
+                      {generatedContent || ''}
+                    </div>
+                  </td>
+                </tr>
+              </tbody>
+              <tfoot>
+                <tr>
+                  <td>
+                    {/* Espaçador invisível para reservar a margem inferior na quebra de página */}
+                    <div className="h-20 bg-transparent w-full" />
+                  </td>
+                </tr>
+              </tfoot>
+            </table>
+
           </div>
         </div>
       </div>
@@ -980,6 +1072,21 @@ Atenciosamente,`;
           </div>
         </form>
       </Modal>
+
+      {/* Rodapé Físico Fixo em todas as páginas no PDF */}
+      <div className="print-footer-fixed border-t border-slate-100 pt-2 flex flex-col font-sans items-center text-center">
+        <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">
+          {docType === 'RESPOSTA_OFICIO' ? 'Prefeitura Municipal de São José do Goiabal' : (profile?.municipality?.name || 'Prefeitura Municipal Exemplo')}
+        </span>
+        <span className="text-[9px] text-slate-400 mt-0.5">
+          {docType === 'RESPOSTA_OFICIO' ? 'CNPJ: 18.293.475/0001-90' : (profile?.municipality?.cnpj ? `CNPJ: ${profile.municipality.cnpj}` : 'CNPJ: 29.115.485/0001-20')}
+        </span>
+        {documentStatus === 'ASSINADO' && (
+          <span className="text-[9px] text-green-700 font-bold mt-2 flex items-center gap-1">
+            <CheckCircle size={10} /> Assinado Digitalmente • Validade Jurídica Simbolizada
+          </span>
+        )}
+      </div>
     </div>
   );
 };
