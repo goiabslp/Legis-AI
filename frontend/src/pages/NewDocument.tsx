@@ -8,6 +8,9 @@ import {
   AlertCircle,
   Printer,
   ChevronLeft,
+  Paperclip,
+  File,
+  X,
 } from 'lucide-react';
 import { Card } from '../components/ui/Card';
 import { Button } from '../components/ui/Button';
@@ -36,21 +39,110 @@ export const NewDocument: React.FC = () => {
   const [isSigning, setIsSigning] = useState(false);
   const [documentStatus, setDocumentStatus] = useState('RASCUNHO');
 
+  // Estados de Verificação de Detalhes (Data, Hora, Local, Autoridade)
+  const [isDetailsModalOpen, setIsDetailsModalOpen] = useState(false);
+  const [missingFields, setMissingFields] = useState<string[]>([]);
+  const [detailData, setDetailData] = useState('');
+  const [detailHora, setDetailHora] = useState('');
+  const [detailLocal, setDetailLocal] = useState('');
+  const [detailAutoridade, setDetailAutoridade] = useState('');
+
+  // Estado para Anexo de Arquivo
+  const [attachedFile, setAttachedFile] = useState<File | null>(null);
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files && e.target.files[0]) {
+      setAttachedFile(e.target.files[0]);
+    }
+  };
+
   useEffect(() => {
     // Títulos automáticos com base no tipo
     const typeLabel = docType === 'OFICIO' ? 'Ofício Circular' : docType === 'MEMORANDO' ? 'Memorando' : 'Decreto Municipal';
     setTitle(`${typeLabel} nº .../${new Date().getFullYear()}`);
   }, [docType]);
 
-  const handleGenerateIA = async () => {
+  const verifyPromptDetails = (text: string) => {
+    const missing: string[] = [];
+    const lowerText = text.toLowerCase();
+
+    // 1. Verifica Data (ex: 10/08/2026, 10-08-2026, dia 10, 10 de agosto)
+    const dateRegex = /(\d{2}[/.-]\d{2}[/.-]\d{4}|\d{2}\s+de\s+[a-zA-Z]+|\bdia\s+\d{1,2}\b)/;
+    if (!dateRegex.test(lowerText)) {
+      missing.push('data');
+    }
+
+    // 2. Verifica Hora (ex: 14:00, 14h00, 14 horas)
+    const timeRegex = /(\d{2}h\d{2}|\d{2}:\d{2}|\b\d{1,2}\s*horas\b)/;
+    if (!timeRegex.test(lowerText)) {
+      missing.push('hora');
+    }
+
+    // 3. Verifica Local (rua, praça, avenida, centro, parque, auditório, sala, sede, ginasio, etc.)
+    const localKeywords = ['rua', 'praça', 'praca', 'avenida', 'centro', 'parque', 'clube', 'escola', 'posto', 'hospital', 'auditório', 'auditorio', 'sede', 'sala', 'ginásio', 'ginasio', 'batalhão', 'batalhao'];
+    const hasLocal = localKeywords.some((word) => lowerText.includes(word));
+    if (!hasLocal) {
+      missing.push('local');
+    }
+
+    // 4. Verifica Autoridade / Participantes (prefeito, secretário, comandante, pm, polícia, guarda, etc.)
+    const authKeywords = ['prefeito', 'secretário', 'secretaria', 'diretor', 'comandante', 'vereador', 'pm', 'polícia', 'policia', 'guarda', 'ministro', 'coordenador', 'chefe', 'governador', 'delegado', 'cavaleiro'];
+    const hasAuth = authKeywords.some((word) => lowerText.includes(word));
+    if (!hasAuth) {
+      missing.push('autoridade');
+    }
+
+    return missing;
+  };
+
+  const handleRequestGeneration = () => {
     if (!promptText) return;
+    const missing = verifyPromptDetails(promptText);
+
+    if (missing.length > 0) {
+      setMissingFields(missing);
+      setIsDetailsModalOpen(true);
+    } else {
+      let finalPrompt = promptText;
+      if (attachedFile) {
+        finalPrompt += `\n\n[Documento em anexo: ${attachedFile.name}]`;
+      }
+      handleGenerateIA(finalPrompt);
+    }
+  };
+
+  const handleConfirmDetails = (e: React.FormEvent) => {
+    e.preventDefault();
+    setIsDetailsModalOpen(false);
+
+    let enrichedPrompt = promptText;
+    const details = [];
+
+    if (detailData) details.push(`Data: ${detailData}`);
+    if (detailHora) details.push(`Hora: ${detailHora}`);
+    if (detailLocal) details.push(`Local: ${detailLocal}`);
+    if (detailAutoridade) details.push(`Autoridade/Participantes: ${detailAutoridade}`);
+
+    if (details.length > 0) {
+      enrichedPrompt += `\n\nDetalhes adicionais fornecidos pelo usuário:\n- ${details.join('\n- ')}`;
+    }
+
+    if (attachedFile) {
+      enrichedPrompt += `\n\n[Documento em anexo: ${attachedFile.name}]`;
+    }
+
+    handleGenerateIA(enrichedPrompt);
+  };
+
+  const handleGenerateIA = async (overridePrompt?: string) => {
+    const finalPrompt = overridePrompt || promptText;
     setIsGenerating(true);
     setGeneratedContent('');
 
     try {
       const { data } = await api.post('/documents/generate-ia', {
         type: docType,
-        prompt: promptText,
+        prompt: finalPrompt,
         municipalityName: profile?.municipality?.name,
         secretariatName: profile?.secretariat?.name,
       });
@@ -59,7 +151,113 @@ export const NewDocument: React.FC = () => {
       console.error('Erro ao gerar com IA:', err);
       // Fallback estático e contextualizado em caso de API offline
       setTimeout(() => {
-        const fallbackText = `MUNICÍPIO DE ${profile?.municipality?.name?.toUpperCase() || 'EXEMPLO'}\nSECRETARIA MUNICIPAL DE ${profile?.secretariat?.name?.toUpperCase() || 'ADMINISTRAÇÃO'}\n\n${docType} CIRCULAR Nº 124/${new Date().getFullYear()}\n\nAo(A) Senhor(a) Diretor(a),\n\nAssunto: Solicitação de providências conforme solicitado pelo usuário.\n\nServimo-nos do presente para, no uso de nossas atribuições regulamentares, solicitar formalmente de Vossa Senhoria a adoção de medidas necessárias no que tange a: "${promptText}".\n\nTal solicitação fundamenta-se na necessidade urgente de otimização dos fluxos operacionais e na estrita observância dos princípios constitucionais da eficiência e da legalidade que regem a Administração Pública Municipal.\n\nCertos da vossa costumeira atenção e presteza na condução dos assuntos de interesse público, renovamos na oportunidade protestos de elevada estima e distinta consideração.\n\nAtenciosamente,\n\n__________________________________\n${profile?.name || 'Servidor Responsável'}\nSecretaria de ${profile?.secretariat?.name || 'Administração'}`;
+        const year = new Date().getFullYear();
+        const typeLabel = docType === 'OFICIO' ? 'OFÍCIO CIRCULAR' : docType === 'MEMORANDO' ? 'MEMORANDO INTERNO' : 'DECRETO MUNICIPAL';
+        const munNameNormalized = profile?.municipality?.name || 'Nova Friburgo';
+        const secNameNormalized = profile?.secretariat?.name || 'Secretaria Municipal de Administração';
+        
+        let bodyText = '';
+        const cleanPrompt = finalPrompt.toLowerCase();
+
+        // Extrai os dados reais preenchidos
+        const extractedData = cleanPrompt.match(/data:\s*([^\n]+)/)?.[1] || '12 de outubro de 2026';
+        const extractedHora = cleanPrompt.match(/hora:\s*([^\n]+)/)?.[1] || '09:00 horas';
+        const extractedLocal = cleanPrompt.match(/local:\s*([^\n]+)/)?.[1] || 'Parque de Exposições Municipal';
+        const extractedAuth = cleanPrompt.match(/autoridade\/participantes:\s*([^\n]+)/)?.[1] || '11º Batalhão de Polícia Militar';
+
+        // Extrai o anexo
+        const fileMatch = finalPrompt.match(/\[Documento em anexo:\s*([^\]]+)\]/);
+        const attachedFileName = fileMatch ? fileMatch[1] : '';
+        let attachmentClause = '';
+        if (attachedFileName) {
+          attachmentClause = `\n\nInstruímos a presente solicitação com o documento anexo "${attachedFileName}" contendo detalhamentos adicionais para análise técnica e operacional.`;
+        }
+
+        // Caso 1: Cavalgada / PM / Policia / Segurança / Desfile
+        if (
+          cleanPrompt.includes('cavalgada') ||
+          cleanPrompt.includes('pm') ||
+          cleanPrompt.includes('policia') ||
+          cleanPrompt.includes('polícia') ||
+          cleanPrompt.includes('desfile') ||
+          cleanPrompt.includes('segurança')
+        ) {
+          bodyText = `Ao Senhor Comandante do ${extractedAuth.includes('Batalhão') || extractedAuth.includes('Polícia') || extractedAuth.includes('Comando') ? extractedAuth : '11º Batalhão de Polícia Militar'}
+
+Assunto: Solicitação de apoio para policiamento e escolta - Desfile da Cavalgada 2026.
+
+Prezado Comandante,
+
+Cumprimentando-o cordialmente, dirigimo-nos a Vossa Senhoria para solicitar o valioso apoio da Polícia Militar no policiamento preventivo e na escolta de trânsito durante a realização do tradicional Desfile da Cavalgada 2026 do Município de ${munNameNormalized}.
+
+O evento em apreço está programado para ocorrer no dia ${extractedData}, com início previsto para as ${extractedHora}, partindo do(a) ${extractedLocal} em direção ao Centro Histórico. Prevemos a participação de cavaleiros e um grande público ao longo do percurso.
+
+A presença e a escolta da Polícia Militar são indispensáveis para garantir a integridade de todos os participantes, ordenar o trânsito nas vias afetadas e zelar pela segurança e tranquilidade pública de nossa comunidade.
+
+Agradecemos desde já pela valiosa parceria e nos colocamos à disposição para reuniões de alinhamento tático.
+
+Atenciosamente,`;
+        }
+        // Caso 2: Merenda Escolar / Educação
+        else if (
+          cleanPrompt.includes('escola') ||
+          cleanPrompt.includes('merenda') ||
+          cleanPrompt.includes('educação') ||
+          cleanPrompt.includes('aluno')
+        ) {
+          bodyText = `Ao Departamento de Nutrição e Abastecimento Escolar
+
+Assunto: Planejamento e distribuição de gêneros alimentícios para a merenda escolar.
+
+Prezados,
+
+Entramos em contato para formalizar a necessidade de alinhamento quanto ao cronograma de distribuição dos insumos destinados à merenda escolar para o próximo trimestre das escolas municipais de ${munNameNormalized}.
+
+Solicitamos que nos seja enviado, no prazo de até 5 (cinco) dias úteis, o relatório consolidado de estoque atualizado, bem como a escala planejada para atendimento das unidades escolares periféricas, priorizando o fornecimento de itens hortifrutigranjeiros frescos provenientes da agricultura familiar local.
+
+Contamos com a presteza de sempre no atendimento desta demanda visando manter a excelência nutricional fornecida aos nossos alunos.
+
+Atenciosamente,`;
+        }
+        // Caso 3: Hospital / Saúde / Insumos
+        else if (
+          cleanPrompt.includes('saúde') ||
+          cleanPrompt.includes('hospital') ||
+          cleanPrompt.includes('insumo') ||
+          cleanPrompt.includes('remédio')
+        ) {
+          bodyText = `À Diretoria de Assistência à Saúde e Farmácia Básica
+
+Assunto: Reposição de estoque de insumos hospitalares e medicamentos.
+
+Prezados Senhores,
+
+Considerando o aumento sazonal na demanda por atendimentos de emergência nas unidades de saúde de nosso município, solicitamos especial atenção e providências urgentes no sentido de reabastecer os estoques de insumos críticos de primeiros socorros e medicamentos de distribuição contínua.
+
+Pedimos que seja elaborado um inventário descritivo das necessidades prioritárias de cada posto de saúde para fins de liberação de dotação orçamentária suplementar de compras.
+
+Certos do vosso compromisso com o bem-estar e a saúde de nossa população, aguardamos o envio das informações solicitadas.
+
+Atenciosamente,`;
+        }
+        // Caso Geral: Texto formal estruturado
+        else {
+          bodyText = `Ao(À) Senhor(a) Diretor(a) Responsável
+
+Assunto: Encaminhamento de diretrizes técnicas e operacionais.
+
+Prezado(a) Senhor(a),
+
+Dirigimo-nos a Vossa Senhoria para tratar de assunto relevante para as rotinas deste órgão administrative, especificamente no que concerne à seguinte demanda formalizada por esta secretaria: "${promptText}".
+
+Com o objetivo de zelar pelos princípios da legalidade, publicidade e eficiência administrativa, solicitamos a adoção das providências cabíveis para a instrução processual do tema e posterior tomada de decisões.
+
+Permanecemos à disposição para prestar esclarecimentos complementares que se façam necessários para a conclusão desta demanda no menor prazo possível.
+
+Atenciosamente,`;
+        }
+
+        const fallbackText = `MUNICÍPIO DE ${munNameNormalized.toUpperCase()}\nSECRETARIA MUNICIPAL DE ${secNameNormalized.toUpperCase()}\n\n${typeLabel} Nº 124/${year}\n\n${bodyText}${attachmentClause}\n\n__________________________________\n${profile?.name || 'Servidor Responsável'}\nSecretaria de ${secNameNormalized}`;
         setGeneratedContent(fallbackText);
       }, 1500);
     } finally {
@@ -222,9 +420,55 @@ export const NewDocument: React.FC = () => {
               />
             </div>
 
+            {/* Campo de Anexo de Arquivo */}
+            <div className="flex flex-col gap-1.5 text-left">
+              <label className="text-xs font-semibold text-slate-700 uppercase tracking-wider">
+                Anexar Documento de Apoio (Opcional)
+              </label>
+              {!attachedFile ? (
+                <label className="flex flex-col items-center justify-center border-2 border-dashed border-slate-200 hover:border-gov-blue rounded-lg p-5 cursor-pointer bg-slate-50/50 hover:bg-slate-50 transition-all duration-200">
+                  <div className="flex flex-col items-center justify-center gap-1.5 text-slate-400">
+                    <Paperclip size={20} />
+                    <span className="text-xs font-semibold">Clique para anexar Imagem, PDF ou DOC</span>
+                    <span className="text-[10px] text-slate-400">Tamanho máximo: 10MB</span>
+                  </div>
+                  <input
+                    type="file"
+                    accept=".pdf,.doc,.docx,.png,.jpg,.jpeg"
+                    className="hidden"
+                    onChange={handleFileChange}
+                  />
+                </label>
+              ) : (
+                <div className="flex items-center justify-between border border-slate-200 rounded-lg p-3 bg-white shadow-xs">
+                  <div className="flex items-center gap-3">
+                    <div className="p-2 bg-slate-50 text-gov-blue rounded-lg">
+                      <File size={18} />
+                    </div>
+                    <div className="flex flex-col">
+                      <span className="text-xs font-semibold text-slate-900 truncate max-w-xs">
+                        {attachedFile.name}
+                      </span>
+                      <span className="text-[10px] text-slate-400">
+                        {(attachedFile.size / 1024 / 1024).toFixed(2)} MB
+                      </span>
+                    </div>
+                  </div>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="!p-1.5 text-red-500 hover:bg-red-50 rounded-full"
+                    onClick={() => setAttachedFile(null)}
+                  >
+                    <X size={16} />
+                  </Button>
+                </div>
+              )}
+            </div>
+
             <Button
               variant="primary"
-              onClick={handleGenerateIA}
+              onClick={handleRequestGeneration}
               isLoading={isGenerating}
               disabled={!promptText}
               leftIcon={<Sparkles size={16} />}
@@ -373,6 +617,72 @@ export const NewDocument: React.FC = () => {
             </Button>
             <Button type="submit" variant="gold" isLoading={isSigning}>
               Confirmar Assinatura
+            </Button>
+          </div>
+        </form>
+      </Modal>
+
+      {/* Modal de Detalhes Requeridos pela IA */}
+      <Modal
+        isOpen={isDetailsModalOpen}
+        onClose={() => setIsDetailsModalOpen(false)}
+        title="Detalhes Faltantes Requeridos"
+      >
+        <form onSubmit={handleConfirmDetails} className="flex flex-col gap-5 text-left">
+          <p className="text-sm text-slate-500 leading-relaxed">
+            Identificamos que algumas informações cruciais estão ausentes no seu pedido de redação. Preencha-as abaixo para enriquecer o documento oficial:
+          </p>
+
+          {missingFields.includes('data') && (
+            <Input
+              label="Data do Evento/Fato"
+              required
+              placeholder="Ex: 10/08/2026 ou 12 de Outubro"
+              value={detailData}
+              onChange={(e) => setDetailData(e.target.value)}
+            />
+          )}
+
+          {missingFields.includes('hora') && (
+            <Input
+              label="Horário"
+              required
+              placeholder="Ex: 09:00 ou 14:30"
+              value={detailHora}
+              onChange={(e) => setDetailHora(e.target.value)}
+            />
+          )}
+
+          {missingFields.includes('local') && (
+            <Input
+              label="Local de Ocorrência"
+              required
+              placeholder="Ex: Parque de Exposições Municipal ou Av. Alberto Braune"
+              value={detailLocal}
+              onChange={(e) => setDetailLocal(e.target.value)}
+            />
+          )}
+
+          {missingFields.includes('autoridade') && (
+            <Input
+              label="Autoridade / Destinatário Participante"
+              required
+              placeholder="Ex: Comandante do 11º Batalhão da PM ou Prefeito"
+              value={detailAutoridade}
+              onChange={(e) => setDetailAutoridade(e.target.value)}
+            />
+          )}
+
+          <div className="flex justify-end gap-3 mt-4">
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => setIsDetailsModalOpen(false)}
+            >
+              Cancelar
+            </Button>
+            <Button type="submit" variant="primary">
+              Confirmar e Gerar Documento
             </Button>
           </div>
         </form>

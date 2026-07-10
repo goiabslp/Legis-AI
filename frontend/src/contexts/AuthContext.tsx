@@ -29,6 +29,7 @@ interface AuthContextType {
   loading: boolean;
   signOut: () => Promise<void>;
   refreshProfile: () => Promise<void>;
+  signInDemo: (email: string) => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -41,11 +42,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const fetchProfile = async (userId: string) => {
     try {
-      // Busca o perfil do usuário do backend integrado com o banco de dados
       const { data } = await api.get<UserProfile>(`/users/${userId}`);
       setProfile(data);
       
-      // Aplica dinamicamente a cor primária do município no tema do Tailwind
       if (data?.municipality?.primaryColor) {
         document.documentElement.style.setProperty('--color-gov-blue', data.municipality.primaryColor);
       }
@@ -61,8 +60,43 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   };
 
+  const signInDemo = async (email: string) => {
+    setLoading(true);
+    const mockUser = {
+      id: 'usr-default-id',
+      email: email || 'guilhermeafsantos@gmail.com',
+      user_metadata: { name: 'Guilherme Santos' },
+    } as any;
+    setUser(mockUser);
+    setProfile({
+      id: 'usr-default-id',
+      email: email || 'guilhermeafsantos@gmail.com',
+      name: 'Guilherme Santos',
+      role: 'ADMIN',
+      secretariatId: 'sec-default-id',
+      municipalityId: 'mun-default-id',
+      municipality: {
+        name: 'Prefeitura Municipal de Nova Friburgo',
+        cnpj: '29.115.485/0001-20',
+        logoUrl: null,
+        primaryColor: '#0f2d59',
+      },
+      secretariat: {
+        name: 'Secretaria Municipal de Administração',
+        code: 'SEMAD',
+      }
+    });
+    setLoading(false);
+  };
+
   useEffect(() => {
-    // Pega a sessão inicial
+    const isDemoMode = !import.meta.env.VITE_SUPABASE_URL || !import.meta.env.VITE_SUPABASE_ANON_KEY;
+
+    if (isDemoMode) {
+      setLoading(false);
+      return;
+    }
+
     supabase.auth.getSession().then(({ data: { session } }) => {
       setSession(session);
       setUser(session?.user ?? null);
@@ -73,7 +107,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       }
     });
 
-    // Escuta mudanças de autenticação
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (_event, session) => {
       setSession(session);
       setUser(session?.user ?? null);
@@ -93,11 +126,17 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   }, []);
 
   const signOut = async () => {
+    const isDemoMode = !import.meta.env.VITE_SUPABASE_URL || !import.meta.env.VITE_SUPABASE_ANON_KEY;
+    if (isDemoMode) {
+      setUser(null);
+      setProfile(null);
+      return;
+    }
     await supabase.auth.signOut();
   };
 
   return (
-    <AuthContext.Provider value={{ user, profile, session, loading, signOut, refreshProfile }}>
+    <AuthContext.Provider value={{ user, profile, session, loading, signOut, refreshProfile, signInDemo }}>
       {children}
     </AuthContext.Provider>
   );

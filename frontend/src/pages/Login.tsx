@@ -5,9 +5,11 @@ import { supabase } from '../services/supabase';
 import { AuthLayout } from '../layouts/AuthLayout';
 import { Input } from '../components/ui/Input';
 import { Button } from '../components/ui/Button';
+import { useAuth } from '../contexts/AuthContext';
 
 export const Login: React.FC = () => {
   const navigate = useNavigate();
+  const { signInDemo } = useAuth();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
@@ -23,7 +25,7 @@ export const Login: React.FC = () => {
       const isDemoMode = !import.meta.env.VITE_SUPABASE_URL || !import.meta.env.VITE_SUPABASE_ANON_KEY;
 
       if (isDemoMode) {
-        await new Promise((resolve) => setTimeout(resolve, 800));
+        await signInDemo(email);
         navigate('/dashboard');
         return;
       }
