@@ -697,17 +697,16 @@ Atenciosamente,`;
       <Modal
         isOpen={isDetailsModalOpen}
         onClose={() => setIsDetailsModalOpen(false)}
-        title="Detalhes Faltantes Requeridos"
+        title="Detalhes do Documento (Opcional)"
       >
         <form onSubmit={handleConfirmDetails} className="flex flex-col gap-5 text-left">
           <p className="text-sm text-slate-500 leading-relaxed">
-            Identificamos que algumas informações cruciais estão ausentes no seu pedido de redação. Preencha-as abaixo para enriquecer o documento oficial:
+            Identificamos que algumas informações não estão explícitas no seu prompt. Você pode preenchê-las abaixo para enriquecer o documento oficial, ou simplesmente pular esta etapa.
           </p>
 
           {missingFields.includes('data') && (
             <Input
               label="Data do Evento/Fato"
-              required
               placeholder="Ex: 10/08/2026 ou 12 de Outubro"
               value={detailData}
               onChange={(e) => setDetailData(e.target.value)}
@@ -717,7 +716,6 @@ Atenciosamente,`;
           {missingFields.includes('hora') && (
             <Input
               label="Horário"
-              required
               placeholder="Ex: 09:00 ou 14:30"
               value={detailHora}
               onChange={(e) => setDetailHora(e.target.value)}
@@ -727,7 +725,6 @@ Atenciosamente,`;
           {missingFields.includes('local') && (
             <Input
               label="Local de Ocorrência"
-              required
               placeholder="Ex: Parque de Exposições Municipal ou Av. Alberto Braune"
               value={detailLocal}
               onChange={(e) => setDetailLocal(e.target.value)}
@@ -737,7 +734,6 @@ Atenciosamente,`;
           {missingFields.includes('autoridade') && (
             <Input
               label="Autoridade / Destinatário Participante"
-              required
               placeholder="Ex: Comandante do 11º Batalhão da PM ou Prefeito"
               value={detailAutoridade}
               onChange={(e) => setDetailAutoridade(e.target.value)}
@@ -752,8 +748,23 @@ Atenciosamente,`;
             >
               Cancelar
             </Button>
+            <Button
+              type="button"
+              variant="outline"
+              className="text-slate-600 hover:bg-slate-50 border-slate-200"
+              onClick={() => {
+                setIsDetailsModalOpen(false);
+                let finalPrompt = promptText;
+                if (attachedFile) {
+                  finalPrompt += `\n\n[Documento em anexo: ${attachedFile.name}]`;
+                }
+                handleGenerateIA(finalPrompt);
+              }}
+            >
+              Gerar Sem Preencher
+            </Button>
             <Button type="submit" variant="primary">
-              Confirmar e Gerar Documento
+              Confirmar e Gerar
             </Button>
           </div>
         </form>
