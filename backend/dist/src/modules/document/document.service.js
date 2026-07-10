@@ -19,12 +19,42 @@ let DocumentService = class DocumentService {
     }
     async generateIA(prompt, type, municipalityName, secretariatName) {
         const year = new Date().getFullYear();
-        const typeLabel = type === 'OFICIO' ? 'OFÍCIO CIRCULAR' : type === 'MEMORANDO' ? 'MEMORANDO INTERNO' : 'DECRETO MUNICIPAL';
+        const typeLabel = type === 'OFICIO'
+            ? 'OFÍCIO CIRCULAR'
+            : type === 'MEMORANDO'
+                ? 'MEMORANDO INTERNO'
+                : type === 'MANIFESTACAO'
+                    ? 'MANIFESTAÇÃO JUDICIAL'
+                    : 'DECRETO MUNICIPAL';
         const munNameNormalized = municipalityName || 'Nova Friburgo';
         const secNameNormalized = secretariatName || 'Secretaria Municipal de Administração';
         let bodyText = '';
         const cleanPrompt = prompt.toLowerCase();
-        if (cleanPrompt.includes('cavalgada') ||
+        if (type === 'MANIFESTACAO' ||
+            cleanPrompt.includes('intimação') ||
+            cleanPrompt.includes('intimacao') ||
+            cleanPrompt.includes('judiciário') ||
+            cleanPrompt.includes('judiciario') ||
+            cleanPrompt.includes('processo') ||
+            cleanPrompt.includes('juiz') ||
+            cleanPrompt.includes('decisão') ||
+            cleanPrompt.includes('decisao')) {
+            bodyText = `Excelentíssimo Senhor Doutor Juiz de Direito da 1ª Vara Cível da Comarca de ${munNameNormalized}
+
+Referência: Processo Judicial nº 0812345-67.2026.8.19.0001
+Assunto: Prestação de informações e manifestação em cumprimento de decisão judicial.
+
+Prezado Magistrado,
+
+Cumprimentando-o respeitosamente, dirigimo-nos a Vossa Excelência, em resposta ao Ofício Judicial nº 450/2026, expedido nos autos do processo em epígrafe, para prestar as informações solicitadas por este juízo no que concerne à seguinte determinação: "${prompt}".
+
+Cumpre-nos informar que esta municipalidade, por meio de seus órgãos técnicos competentes, já adotou as providências administrativas necessárias para dar estrito e imediato cumprimento à tutela jurisdicional deferida por este renovado juízo.
+
+Colocamo-nos à inteira disposição deste Juízo para prestar quaisquer esclarecimentos complementares que se façam necessários para a completa elucidação da lide.
+
+Respeitosamente,`;
+        }
+        else if (cleanPrompt.includes('cavalgada') ||
             cleanPrompt.includes('pm') ||
             cleanPrompt.includes('policia') ||
             cleanPrompt.includes('polícia') ||

@@ -11,12 +11,18 @@ import {
   Paperclip,
   File,
   X,
+  Mail,
+  FileText,
+  Gavel,
+  Megaphone,
+  Scale,
 } from 'lucide-react';
 import { Card } from '../components/ui/Card';
 import { Button } from '../components/ui/Button';
 import { Input } from '../components/ui/Input';
 import { Modal } from '../components/ui/Modal';
 import { useAuth } from '../contexts/AuthContext';
+import { Select, type SelectOption } from '../components/ui/Select';
 import api from '../services/api';
 
 export const NewDocument: React.FC = () => {
@@ -56,9 +62,49 @@ export const NewDocument: React.FC = () => {
     }
   };
 
+  const docTypeOptions: SelectOption[] = [
+    {
+      value: 'OFICIO',
+      label: 'Ofício Circular',
+      description: 'Modelo oficial para comunicação externa com órgãos públicos',
+      icon: <Mail size={16} />,
+    },
+    {
+      value: 'MEMORANDO',
+      label: 'Memorando Administrativo',
+      description: 'Comunicação direta entre setores internos do município',
+      icon: <FileText size={16} />,
+    },
+    {
+      value: 'DECRETO',
+      label: 'Decreto Municipal',
+      description: 'Ato administrativo normativo expedido pelo Prefeito',
+      icon: <Gavel size={16} />,
+    },
+    {
+      value: 'EDITAL',
+      label: 'Edital de Convocação',
+      description: 'Aviso público ou chamamento oficial de interesse geral',
+      icon: <Megaphone size={16} />,
+    },
+    {
+      value: 'MANIFESTACAO',
+      label: 'Resposta de Manifestação Judiciário',
+      description: 'Resposta formal a intimações, ofícios judiciais ou mandados',
+      icon: <Scale size={16} />,
+    },
+  ];
+
   useEffect(() => {
     // Títulos automáticos com base no tipo
-    const typeLabel = docType === 'OFICIO' ? 'Ofício Circular' : docType === 'MEMORANDO' ? 'Memorando' : 'Decreto Municipal';
+    const typeLabel =
+      docType === 'OFICIO'
+        ? 'Ofício Circular'
+        : docType === 'MEMORANDO'
+        ? 'Memorando'
+        : docType === 'MANIFESTACAO'
+        ? 'Resposta de Manifestação Judiciário'
+        : 'Decreto Municipal';
     setTitle(`${typeLabel} nº .../${new Date().getFullYear()}`);
   }, [docType]);
 
@@ -152,7 +198,14 @@ export const NewDocument: React.FC = () => {
       // Fallback estático e contextualizado em caso de API offline
       setTimeout(() => {
         const year = new Date().getFullYear();
-        const typeLabel = docType === 'OFICIO' ? 'OFÍCIO CIRCULAR' : docType === 'MEMORANDO' ? 'MEMORANDO INTERNO' : 'DECRETO MUNICIPAL';
+        const typeLabel =
+          docType === 'OFICIO'
+            ? 'OFÍCIO CIRCULAR'
+            : docType === 'MEMORANDO'
+            ? 'MEMORANDO INTERNO'
+            : docType === 'MANIFESTACAO'
+            ? 'MANIFESTAÇÃO JUDICIAL'
+            : 'DECRETO MUNICIPAL';
         const munNameNormalized = profile?.municipality?.name || 'Nova Friburgo';
         const secNameNormalized = profile?.secretariat?.name || 'Secretaria Municipal de Administração';
         
@@ -173,8 +226,35 @@ export const NewDocument: React.FC = () => {
           attachmentClause = `\n\nInstruímos a presente solicitação com o documento anexo "${attachedFileName}" contendo detalhamentos adicionais para análise técnica e operacional.`;
         }
 
-        // Caso 1: Cavalgada / PM / Policia / Segurança / Desfile
+        // Caso 0: Manifestação Judiciária
         if (
+          docType === 'MANIFESTACAO' ||
+          cleanPrompt.includes('intimação') ||
+          cleanPrompt.includes('intimacao') ||
+          cleanPrompt.includes('judiciário') ||
+          cleanPrompt.includes('judiciario') ||
+          cleanPrompt.includes('processo') ||
+          cleanPrompt.includes('juiz') ||
+          cleanPrompt.includes('decisão') ||
+          cleanPrompt.includes('decisao')
+        ) {
+          bodyText = `Excelentíssimo Senhor Doutor Juiz de Direito da 1ª Vara Cível da Comarca de ${munNameNormalized}
+
+Referência: Processo Judicial nº 0812345-67.2026.8.19.0001
+Assunto: Prestação de informações e manifestação em cumprimento de decisão judicial.
+
+Prezado Magistrado,
+
+Cumprimentando-o respeitosamente, dirigimo-nos a Vossa Excelência, em resposta ao Ofício Judicial nº 450/2026, expedido nos autos do processo em epígrafe, para prestar as informações solicitadas por este juízo no que concerne à seguinte determinação: "${promptText}".
+
+Cumpre-nos informar que esta municipalidade, por meio de seus órgãos técnicos competentes, já adotou as providências administrativas necessárias para dar estrito e imediato cumprimento à tutela jurisdicional deferida por este renovado juízo.
+
+Colocamo-nos à inteira disposição deste Juízo para prestar quaisquer esclarecimentos complementares que se façam necessários para a completa elucidação da lide.
+
+Respeitosamente,`;
+        }
+        // Caso 1: Cavalgada / PM / Policia / Segurança / Desfile
+        else if (
           cleanPrompt.includes('cavalgada') ||
           cleanPrompt.includes('pm') ||
           cleanPrompt.includes('policia') ||
@@ -382,21 +462,12 @@ Atenciosamente,`;
               <Sparkles size={16} className="text-gov-gold" /> Parâmetros do Documento
             </h3>
 
-            <div className="flex flex-col gap-1.5 text-left">
-              <label className="text-xs font-semibold text-slate-700 uppercase tracking-wider">
-                Tipo de Documento
-              </label>
-              <select
-                value={docType}
-                onChange={(e) => setDocType(e.target.value)}
-                className="w-full rounded-lg border border-slate-200 bg-white px-4 py-2.5 text-sm text-slate-900 focus:border-gov-blue focus:ring-1 focus:ring-gov-blue outline-none"
-              >
-                <option value="OFICIO">Ofício Circular (Comunicação Externa)</option>
-                <option value="MEMORANDO">Memorando (Comunicação Interna)</option>
-                <option value="DECRETO">Decreto Municipal (Normativo)</option>
-                <option value="EDITAL">Edital de Convocação (Público)</option>
-              </select>
-            </div>
+            <Select
+              label="Tipo de Documento"
+              value={docType}
+              onChange={setDocType}
+              options={docTypeOptions}
+            />
 
             <Input
               label="Título do Documento"
