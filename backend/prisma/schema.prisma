@@ -1,0 +1,127 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+datasource db {
+  provider = "postgresql"
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model Municipality {
+  id           String        @id @default(uuid())
+  name         String
+  cnpj         String        @unique
+  logoUrl      String?
+  primaryColor String        @default("#0f172a") // Tailwind Slate-900 por padrão
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+  secretariats Secretariat[]
+  users        User[]
+
+  @@map("municipalities")
+}
+
+model Secretariat {
+  id             String             @id @default(uuid())
+  name           String
+  code           String             // Ex: SEMED, SMS, SEMAD
+  municipalityId String
+  municipality   Municipality       @relation(fields: [municipalityId], references: [id], onDelete: Cascade)
+  createdAt      DateTime           @default(now())
+  updatedAt      DateTime           @updatedAt
+  users          User[]
+  documents      Document[]
+  templates      DocumentTemplate[]
+
+  @@unique([municipalityId, code])
+  @@map("secretariats")
+}
+
+model User {
+  id             String             @id // Corresponde ao ID do Supabase Auth
+  email          String             @unique
+  name           String
+  role           String             @default("USER") // USER, ADMIN, SECRETARY_ADMIN
+  secretariatId  String?
+  secretariat    Secretariat?       @relation(fields: [secretariatId], references: [id], onDelete: SetNull)
+  municipalityId String
+  municipality   Municipality       @relation(fields: [municipalityId], references: [id], onDelete: Cascade)
+  createdAt      DateTime           @default(now())
+  updatedAt      DateTime           @updatedAt
+  documents      Document[]
+  favorites      FavoriteDocument[]
+  histories      DocumentHistory[]
+
+  @@map("users")
+}
+
+model DocumentTemplate {
+  id               String      @id @default(uuid())
+  title            String
+  description      String?
+  contentStructure String      @db.Text // Modelo em Markdown ou HTML base
+  dynamicFields    Json        // Definição dos campos dinâmicos ex: [{"name": "destinatario", "type": "text"}]
+  secretariatId    String?
+  secretariat      Secretariat? @relation(fields: [secretariatId], references: [id], onDelete: SetNull)
+  createdAt        DateTime    @default(now())
+  updatedAt        DateTime    @updatedAt
+
+  @@map("document_templates")
+}
+
+model Document {
+  id             String             @id @default(uuid())
+  title          String
+  content        String             @db.Text
+  type           String             // OFICIO, MEMORANDO, DECRETO, LEI, etc.
+  status         String             @default("RASCUNHO") // RASCUNHO, FINALIZADO, ASSINADO
+  secretariatId  String
+  secretariat    Secretariat        @relation(fields: [secretariatId], references: [id])
+  authorId       String
+  author         User               @relation(fields: [authorId], references: [id])
+  createdAt      DateTime           @default(now())
+  updatedAt      DateTime           @updatedAt
+  favorites      FavoriteDocument[]
+  histories      DocumentHistory[]
+  signature      DigitalSignature?
+
+  @@map("documents")
+}
+
+model DocumentHistory {
+  id         String   @id @default(uuid())
+  documentId String
+  document   Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  content    String   @db.Text
+  authorId   String
+  author     User     @relation(fields: [authorId], references: [id])
+  createdAt  DateTime @default(now())
+
+  @@map("document_histories")
+}
+
+model FavoriteDocument {
+  id         String   @id @default(uuid())
+  userId     String
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  documentId String
+  document   Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  createdAt  DateTime @default(now())
+
+  @@unique([userId, documentId])
+  @@map("favorite_documents")
+}
+
+model DigitalSignature {
+  id             String   @id @default(uuid())
+  documentId     String   @unique
+  document       Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  signerName     String
+  signerDocument String   // CPF ou matrícula
+  signatureHash  String
+  signedAt       DateTime @default(now())
+
+  @@map("digital_signatures")
+}
