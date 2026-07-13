@@ -1,0 +1,13 @@
+{
+  "name": "legis-ai",
+  "version": "1.0.0",
+  "description": "Legis AI - Workspace Root",
+  "scripts": {
+    "dev:backend": "npm run start:dev --prefix backend",
+    "dev:frontend": "npm run dev --prefix frontend",
+    "dev": "concurrently \"npm run dev:backend\" \"npm run dev:frontend\""
+  },
+  "devDependencies": {
+    "concurrently": "^8.2.2"
+  }
+}
