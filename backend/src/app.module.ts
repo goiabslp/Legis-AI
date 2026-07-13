@@ -7,6 +7,7 @@ import { SupabaseModule } from './infra/supabase/supabase.module';
 import { AuthModule } from './modules/auth/auth.module';
 import { MunicipalityModule } from './modules/municipality/municipality.module';
 import { DocumentModule } from './modules/document/document.module';
+import { KnowledgeModule } from './modules/knowledge/knowledge.module';
 
 @Module({
   imports: [
@@ -18,6 +19,7 @@ import { DocumentModule } from './modules/document/document.module';
     AuthModule,
     MunicipalityModule,
     DocumentModule,
+    KnowledgeModule,
   ],
   controllers: [AppController],
   providers: [AppService],

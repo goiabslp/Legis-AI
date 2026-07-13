@@ -6,20 +6,18 @@ var __decorate = (this && this.__decorate) || function (decorators, target, key,
     return c > 3 && r && Object.defineProperty(target, key, r), r;
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.DocumentModule = void 0;
+exports.KnowledgeModule = void 0;
 const common_1 = require("@nestjs/common");
-const document_service_1 = require("./document.service");
-const document_controller_1 = require("./document.controller");
-const knowledge_module_1 = require("../knowledge/knowledge.module");
-let DocumentModule = class DocumentModule {
+const knowledge_service_1 = require("./knowledge.service");
+const knowledge_controller_1 = require("./knowledge.controller");
+let KnowledgeModule = class KnowledgeModule {
 };
-exports.DocumentModule = DocumentModule;
-exports.DocumentModule = DocumentModule = __decorate([
+exports.KnowledgeModule = KnowledgeModule;
+exports.KnowledgeModule = KnowledgeModule = __decorate([
     (0, common_1.Module)({
-        imports: [knowledge_module_1.KnowledgeModule],
-        controllers: [document_controller_1.DocumentController],
-        providers: [document_service_1.DocumentService],
-        exports: [document_service_1.DocumentService],
+        controllers: [knowledge_controller_1.KnowledgeController],
+        providers: [knowledge_service_1.KnowledgeService],
+        exports: [knowledge_service_1.KnowledgeService],
     })
-], DocumentModule);
-//# sourceMappingURL=document.module.js.map
+], KnowledgeModule);
+//# sourceMappingURL=knowledge.module.js.map

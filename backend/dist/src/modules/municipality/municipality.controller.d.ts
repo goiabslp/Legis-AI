@@ -9,12 +9,12 @@ export declare class MunicipalityController {
         primaryColor?: string;
     }): Promise<{
         id: string;
-        cnpj: string;
         name: string;
-        logoUrl: string | null;
-        primaryColor: string;
         createdAt: Date;
         updatedAt: Date;
+        cnpj: string;
+        logoUrl: string | null;
+        primaryColor: string;
     }>;
     addSecretariat(id: string, data: {
         name: string;

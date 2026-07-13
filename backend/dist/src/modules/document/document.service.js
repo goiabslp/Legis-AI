@@ -13,10 +13,13 @@ exports.DocumentService = void 0;
 exports.rephraseInstruction = rephraseInstruction;
 const common_1 = require("@nestjs/common");
 const prisma_service_1 = require("../../infra/database/prisma.service");
+const knowledge_service_1 = require("../knowledge/knowledge.service");
 let DocumentService = class DocumentService {
     prisma;
-    constructor(prisma) {
+    knowledgeService;
+    constructor(prisma, knowledgeService) {
         this.prisma = prisma;
+        this.knowledgeService = knowledgeService;
     }
     async generateIA(prompt, type, municipalityName, secretariatName) {
         const year = new Date().getFullYear();
@@ -35,6 +38,8 @@ let DocumentService = class DocumentService {
         const attachedFileName = fileMatch ? fileMatch[1] : '';
         const hasAttachment = !!attachedFileName;
         const cleanPromptDisplay = prompt.replace(/\[Documento em anexo:\s*([^\]]+)\]/, '').trim();
+        const ragResults = await this.knowledgeService.search(prompt, 2);
+        const hasRagBase = ragResults.length > 0 && ragResults[0].score > 0.15;
         if (type === 'RESPOSTA_OFICIO') {
             let autoridade = 'Dr. Aylor Luiz Meirelles Júnior (Promotor de Justiça)';
             let orgao = 'Ministério Público do Estado de Minas Gerais (Promotoria de Justiça de São Domingos do Prata)';
@@ -49,22 +54,25 @@ let DocumentService = class DocumentService {
                 autoridade = 'Dra. Márcia Lima (Presidente do Conselho)';
                 tema = 'Fiscalização de insumos críticos na Farmácia Básica';
             }
+            const rephraseInstruction = (p, t) => {
+                return `Em atenção ao tema "${t}", manifestamos que a Administração Municipal está adotando todas as providências legais cabíveis para o atendimento das solicitações enviadas, pautando-se estritamente pela legalidade e transparência nos atos públicos. Os documentos requisitados encontram-se em fase de triagem final pelo setor competente e serão remetidos integralmente no menor prazo legal de tramitação.`;
+            };
             const formattedResponse = rephraseInstruction(cleanPromptDisplay, tema);
             bodyText = `Ao(À) Excelentíssimo(a) Senhor(a) ${autoridade}
 ${orgao}
-
+ 
 Assunto: Resposta ao Ofício Requisitório - Tema: ${tema}.
-
+ 
 Prezado(a) Senhor(a),
-
+ 
 Cumprimentando-o(a) cordialmente e no uso das atribuições que regem as rotinas deste órgão administrativo do Município de ${munNameNormalized}, dirigimo-nos a Vossa Senhoria em resposta ao expediente encaminhado, cuja análise técnica foi formalmente realizada com base no documento anexo "${attachedFileName}".
-
+ 
 Em atenção aos pontos solicitados e em observância às diretrizes da administração pública, apresentamos as manifestações e informações requeridas:
-
+ 
 ${formattedResponse}
-
+ 
 Diante do exposto e pautados nos princípios da eficiência e publicidade administrativa (Art. 37 da Constituição Federal), permanecemos à inteira disposição para prestar quaisquer esclarecimentos complementares que se façam necessários.
-
+ 
 Atenciosamente,`;
         }
         else if (cleanPrompt.includes('cavalgada') ||
@@ -89,17 +97,17 @@ Atenciosamente,`;
             const horaText = extractedHora ? `com início previsto para as ${extractedHora}` : 'no horário estipulado';
             const localText = extractedLocal ? `partindo do(a) ${extractedLocal}` : 'partindo da área de concentração indicada';
             bodyText = `Ao Senhor Comandante do ${authText}
-
+ 
 Assunto: Solicitação de apoio operacional e policiamento preventivo - Desfile da Cavalgada.
-
+ 
 Prezado Comandante,
-
+ 
 ${pmIntro}, dirigimo-nos a Vossa Senhoria para solicitar o valioso e imprescindível apoio da Polícia Militar no policiamento ostensivo e na escolta de trânsito durante a realização do tradicional Desfile da Cavalgada do Município de ${munNameNormalized}.
-
+ 
 Tal solicitação encontra amparo legal no Art. 144 da Constituição Federal de 1988, o qual estabelece a segurança pública como dever do Estado e direito de todos, exercida para a preservação da ordem pública e da incolumidade das pessoas e do patrimônio. O evento está programado para ocorrer ${dataText}, ${horaText}, ${localText} em direção ao Centro Histórico, sendo a cooperação com a corporação indispensável para zelar pela segurança pública de nossa comunidade.
-
+ 
 Agradecemos imensamente desde já a vossa costumeira cooperação e nos colocamos à disposição para a realização de reuniões de planejamento integrado.
-
+ 
 Atenciosamente,`;
         }
         else if (cleanPrompt.includes('escola') ||
@@ -110,17 +118,17 @@ Atenciosamente,`;
                 ? `Após análise detida do relatório de insumos e especificações técnicas dispostas no documento anexo "${attachedFileName}"`
                 : 'Entramos em contato para formalizar a necessidade de alinhamento';
             bodyText = `Ao Departamento de Nutrição e Abastecimento Escolar - Secretaria de Educação
-
+ 
 Assunto: Planejamento e distribuição de insumos alimentícios - Merenda Escolar.
-
+ 
 Prezados,
-
+ 
 ${eduIntro}, dirigimo-nos a esta diretoria para tratar da otimização do cronograma de distribuição dos alimentos destinados à merenda escolar para as escolas municipais de ${munNameNormalized}.
-
+ 
 Esta demanda fundamenta-se nas diretrizes da Lei Federal nº 11.947/2009 (Programa Nacional de Alimentação Escolar - PNAE), que regulamenta a garantia de uma alimentação saudável, adequada e segura para todos os alunos da educação básica pública. Solicitamos que as entregas do próximo trimestre priorizem itens frescos originários da agricultura familiar local, em conformidade com o percentual legal obrigatório de compras públicas sustentáveis.
-
+ 
 Certos de vossa presteza no atendimento a esta importante causa educacional, colocamo-nos à disposição para esclarecimentos.
-
+ 
 Atenciosamente,`;
         }
         else if (cleanPrompt.includes('saúde') ||
@@ -131,17 +139,17 @@ Atenciosamente,`;
                 ? `Tendo em vista a análise técnica do inventário e quadro demonstrativo anexados no documento "${attachedFileName}"`
                 : 'Considerando o aumento sazonal na demanda por atendimentos de emergência nas unidades de saúde';
             bodyText = `À Diretoria de Assistência à Saúde e Farmácia Básica Municipal
-
+ 
 Assunto: Providências para reposição imediata de medicamentos e insumos hospitalares.
-
+ 
 Prezados Senhores,
-
+ 
 ${saudeIntro}, solicitamos especial atenção e providências tempestivas para a reposição de insumos críticos de primeiros socorros e medicamentos de distribuição contínua.
-
+ 
 Este pedido está respaldado pela Lei Federal nº 8.080/1990 (Lei Orgânica da Saúde), que assegura o direito fundamental à saúde e impõe à administração pública o dever de fornecer assistência terapêutica integral aos cidadãos. A devida reposição é indispensável para mantermos a qualidade do atendimento nas unidades de saúde de ${munNameNormalized} e evitarmos desabastecimentos que prejudiquem nossa população.
-
+ 
 Agradecemos o vosso permanente compromisso com a saúde pública municipal e estamos à disposição para auxiliar no trâmite de liberação de dotações orçamentárias.
-
+ 
 Atenciosamente,`;
         }
         else {
@@ -149,20 +157,30 @@ Atenciosamente,`;
                 ? `Após exame pormenorizado das especificações técnicas anexadas no documento "${attachedFileName}"`
                 : 'Dirigimo-nos a Vossa Senhoria para tratar de assunto relevante para as rotinas deste órgão';
             bodyText = `Ao(À) Senhor(a) Diretor(a) Responsável do Departamento Competente
-
+ 
 Assunto: Encaminhamento de diretrizes operacionais em observância às instruções da secretaria.
-
+ 
 Prezado(a) Senhor(a),
-
+ 
 ${geralIntro}, apresentamos formalmente as manifestações técnicas quanto à seguinte demanda: "${cleanPromptDisplay}".
-
+ 
 A referida solicitação pauta-se no princípio da eficiência e da legalidade que rege a Administração Pública, conforme preconiza o Art. 37, caput, da Constituição Federal. Solicitamos a adoção das providências administrativas necessárias para instrução do processo e posterior manifestação no menor prazo possível.
-
+ 
 Agradecemos vossa costumeira colaboração e colocamo-nos à disposição para apoiar as equipes técnicas envolvidas.
-
+ 
 Atenciosamente,`;
         }
-        const content = `MUNICÍPIO DE ${munNameNormalized.toUpperCase()}\nSECRETARIA MUNICIPAL DE ${secNameNormalized.toUpperCase()}\n\n${typeLabel} Nº 124/${year}\n\n${bodyText}\n\n\n\n\n__________________________________\nServidor Responsável\n${secNameNormalized}`;
+        let fundamentacaoLegal = '';
+        if (hasRagBase) {
+            fundamentacaoLegal = `\n\n=== FUNDAMENTAÇÃO LEGAL (Consulta Base de Conhecimento Jurídica) ===\n` +
+                ragResults
+                    .map((r, i) => `[Referência ${i + 1}] ${r.artigo} da obra "${r.titulo}" (${r.categoria}):\n"${r.texto}"`)
+                    .join('\n\n');
+        }
+        else {
+            fundamentacaoLegal = `\n\n=== ANÁLISE JURÍDICA (Consulta Base de Conhecimento Jurídica) ===\nAlerta do Sistema: Não foi localizada fundamentação suficiente específica para este caso na Base de Conhecimento Jurídica. Conforme as regras de precisão da IA, foi evitada a invenção de dispositivos legais.`;
+        }
+        const content = `MUNICÍPIO DE ${munNameNormalized.toUpperCase()}\nSECRETARIA MUNICIPAL DE ${secNameNormalized.toUpperCase()}\n\n${typeLabel} Nº 124/${year}\n\n${bodyText}${fundamentacaoLegal}\n\n\n\n\n__________________________________\nServidor Responsável\n${secNameNormalized}`;
         return { content };
     }
     async create(data) {
@@ -241,7 +259,8 @@ Atenciosamente,`;
 exports.DocumentService = DocumentService;
 exports.DocumentService = DocumentService = __decorate([
     (0, common_1.Injectable)(),
-    __metadata("design:paramtypes", [prisma_service_1.PrismaService])
+    __metadata("design:paramtypes", [prisma_service_1.PrismaService,
+        knowledge_service_1.KnowledgeService])
 ], DocumentService);
 function rephraseInstruction(instruction, tema) {
     if (!instruction) {

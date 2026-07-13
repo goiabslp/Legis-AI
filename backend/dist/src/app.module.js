@@ -16,6 +16,7 @@ const supabase_module_1 = require("./infra/supabase/supabase.module");
 const auth_module_1 = require("./modules/auth/auth.module");
 const municipality_module_1 = require("./modules/municipality/municipality.module");
 const document_module_1 = require("./modules/document/document.module");
+const knowledge_module_1 = require("./modules/knowledge/knowledge.module");
 let AppModule = class AppModule {
 };
 exports.AppModule = AppModule;
@@ -30,6 +31,7 @@ exports.AppModule = AppModule = __decorate([
             auth_module_1.AuthModule,
             municipality_module_1.MunicipalityModule,
             document_module_1.DocumentModule,
+            knowledge_module_1.KnowledgeModule,
         ],
         controllers: [app_controller_1.AppController],
         providers: [app_service_1.AppService],

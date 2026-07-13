@@ -259,29 +259,6 @@ export const Dashboard: React.FC = () => {
               </Button>
             </div>
           </Card>
-
-          <h3 className="text-lg font-bold text-slate-950 tracking-tight mt-2">Dica de Produtividade</h3>
-          <Card className="bg-radial-at-tr from-slate-950 to-slate-900 text-white relative overflow-hidden">
-            <div className="relative z-10">
-              <span className="text-[10px] text-gov-gold font-bold uppercase tracking-wider bg-white/10 px-2 py-1 rounded-md">
-                Dica da IA
-              </span>
-              <p className="text-sm leading-relaxed mt-4 text-slate-300">
-                Você sabia que pode detalhar tópicos, anexos e prazos legais no campo de prompt para que a IA gere a fundamentação legal de decretos automaticamente?
-              </p>
-              <Button
-                variant="gold"
-                size="sm"
-                className="mt-6 w-full gap-2"
-                onClick={() => navigate('/documentos/novo')}
-                rightIcon={<ArrowRight size={14} />}
-              >
-                Testar Geração Avançada
-              </Button>
-            </div>
-            {/* Decoração sutil */}
-            <div className="absolute -bottom-20 -right-20 w-44 h-44 rounded-full bg-white/5" />
-          </Card>
         </div>
       </div>
     </div>

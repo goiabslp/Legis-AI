@@ -1,7 +1,9 @@
 import { PrismaService } from '../../infra/database/prisma.service';
+import { KnowledgeService } from '../knowledge/knowledge.service';
 export declare class DocumentService {
     private prisma;
-    constructor(prisma: PrismaService);
+    private knowledgeService;
+    constructor(prisma: PrismaService, knowledgeService: KnowledgeService);
     generateIA(prompt: string, type: string, municipalityName?: string, secretariatName?: string): Promise<{
         content: string;
     }>;
