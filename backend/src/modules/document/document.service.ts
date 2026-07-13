@@ -179,7 +179,7 @@ Agradecemos vossa costumeira colaboração e colocamo-nos à disposição para a
 Atenciosamente,`;
     }
 
-    const content = `MUNICÍPIO DE ${munNameNormalized.toUpperCase()}\nSECRETARIA MUNICIPAL DE ${secNameNormalized.toUpperCase()}\n\n${typeLabel} Nº 124/${year}\n\n${bodyText}\n\n__________________________________\nServidor Responsável\nSecretaria de ${secNameNormalized}`;
+    const content = `MUNICÍPIO DE ${munNameNormalized.toUpperCase()}\nSECRETARIA MUNICIPAL DE ${secNameNormalized.toUpperCase()}\n\n${typeLabel} Nº 124/${year}\n\n${bodyText}\n\n\n\n\n__________________________________\nServidor Responsável\n${secNameNormalized}`;
 
     return { content };
   }

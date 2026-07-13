@@ -422,7 +422,7 @@ Agradecemos vossa costumeira colaboração e colocamo-nos à disposição para a
 Atenciosamente,`;
         }
 
-        const fallbackText = `MUNICÍPIO DE ${munNameNormalized.toUpperCase()}\nSECRETARIA MUNICIPAL DE ${secNameNormalized.toUpperCase()}\n\n${typeLabel} Nº 124/${year}\n\n${bodyText}\n\n__________________________________\n${profile?.name || 'Servidor Responsável'}\nSecretaria de ${secNameNormalized}`;
+        const fallbackText = `MUNICÍPIO DE ${munNameNormalized.toUpperCase()}\nSECRETARIA MUNICIPAL DE ${secNameNormalized.toUpperCase()}\n\n${typeLabel} Nº 124/${year}\n\n${bodyText}\n\n\n\n\n__________________________________\n${profile?.name || 'Servidor Responsável'}\n${secNameNormalized}`;
         setGeneratedContent(fallbackText);
       }, 1500);
     } finally {
@@ -926,8 +926,63 @@ Atenciosamente,`;
               <tbody>
                 <tr>
                   <td>
-                    <div className="whitespace-pre-wrap text-sm leading-relaxed text-slate-800 pt-6">
-                      {generatedContent || ''}
+                    <div className="text-sm leading-relaxed text-slate-800 pt-6">
+                      {(() => {
+                        let isBoldArea = true;
+                        return (generatedContent || '').split(/\n\n+/).map((para, idx) => {
+                          if (!para.trim()) return null;
+                          
+                          const cleanPara = para.trim().toLowerCase();
+                          const currentBold = isBoldArea;
+
+                          // Se o parágrafo contiver a palavra "Assunto:", o próximo parágrafo deixa de ser negrito
+                          if (cleanPara.startsWith('assunto:') || cleanPara.includes('assunto:')) {
+                            isBoldArea = false;
+                          }
+
+                          // Desativa o negrito para saudações ou introduções
+                          if (
+                            cleanPara.startsWith('prezado') ||
+                            cleanPara.startsWith('prezada') ||
+                            cleanPara.startsWith('prezados') ||
+                            cleanPara.startsWith('prezadas') ||
+                            cleanPara.startsWith('senhor ') ||
+                            cleanPara.startsWith('senhora ')
+                          ) {
+                            isBoldArea = false;
+                          }
+
+                          const isParagraphBold = currentBold && 
+                            !cleanPara.startsWith('prezado') && 
+                            !cleanPara.startsWith('prezada') && 
+                            !cleanPara.startsWith('prezados') &&
+                            !cleanPara.startsWith('prezadas');
+
+                          const isSignatureBlock = cleanPara.includes('_____') || cleanPara.includes('___');
+
+                          const paragraphClass = `whitespace-pre-wrap print-paragraph ${
+                            isSignatureBlock 
+                              ? 'text-center font-normal font-sans border-t-0' 
+                              : isParagraphBold 
+                              ? 'mb-4 font-bold text-slate-950 font-sans' 
+                              : 'mb-4 font-normal font-serif text-slate-800'
+                          }`;
+
+                          const extraStyles = isSignatureBlock 
+                            ? { breakInside: 'avoid' as const, pageBreakInside: 'avoid' as const, paddingTop: '6rem' } 
+                            : undefined;
+
+                          return (
+                            <p 
+                              key={idx} 
+                              className={paragraphClass} 
+                              style={extraStyles}
+                            >
+                              {para}
+                            </p>
+                          );
+                        });
+                      })()}
                     </div>
                   </td>
                 </tr>

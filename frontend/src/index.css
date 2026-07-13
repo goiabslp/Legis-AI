@@ -69,4 +69,12 @@ body {
   .printable-area > .absolute {
     display: none !important;
   }
+
+  /* Evita quebras de estrofes de forma indesejada no PDF */
+  .print-paragraph {
+    orphans: 4 !important;
+    widows: 4 !important;
+    page-break-inside: avoid !important;
+    break-inside: avoid !important;
+  }
 }
