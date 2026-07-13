@@ -46,38 +46,13 @@ export const Dashboard: React.FC = () => {
         setStats(statsRes.data);
       } catch (err) {
         console.error('Erro ao buscar dados do dashboard:', err);
-        // Fallback fictício para demonstração de UX premium caso a API não esteja ativa localmente
-        setDocuments([
-          {
-            id: '1',
-            title: 'Ofício Circular nº 42/2026 - Convocação de Assembleia Extraordinária',
-            type: 'OFICIO',
-            status: 'ASSINADO',
-            createdAt: new Date().toISOString(),
-            authorName: profile?.name || 'Servidor Exemplo',
-          },
-          {
-            id: '2',
-            title: 'Memorando de Aquisição de Insumos Hospitalares Especiais',
-            type: 'MEMORANDO',
-            status: 'RASCUNHO',
-            createdAt: new Date(Date.now() - 3600000 * 2).toISOString(),
-            authorName: profile?.name || 'Servidor Exemplo',
-          },
-          {
-            id: '3',
-            title: 'Decreto Municipal nº 115 - Férias Coletivas dos Servidores',
-            type: 'DECRETO',
-            status: 'FINALIZADO',
-            createdAt: new Date(Date.now() - 3600000 * 24).toISOString(),
-            authorName: 'Ana Cláudia (RH)',
-          },
-        ]);
+        // Inicia zerado sem dados mockados falsos
+        setDocuments([]);
         setStats({
-          total: 124,
-          pending: 5,
-          templates: 18,
-          favorites: 8,
+          total: 0,
+          pending: 0,
+          templates: 0,
+          favorites: 0,
         });
       } finally {
         setLoading(false);

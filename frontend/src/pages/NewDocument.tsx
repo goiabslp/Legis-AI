@@ -2,7 +2,6 @@ import React, { useState, useEffect } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
 import {
   Sparkles,
-  Signature,
   Save,
   CheckCircle,
   AlertCircle,
@@ -16,6 +15,8 @@ import {
   Gavel,
   Megaphone,
   Scale,
+  MessageSquare,
+  Send,
 } from 'lucide-react';
 import { Card } from '../components/ui/Card';
 import { Button } from '../components/ui/Button';
@@ -41,11 +42,7 @@ export const NewDocument: React.FC = () => {
   const [isGenerating, setIsGenerating] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
 
-  // Modal de Assinatura
-  const [isSignatureModalOpen, setIsSignatureModalOpen] = useState(false);
-  const [signerName, setSignerName] = useState(profile?.name || '');
-  const [signerDocument, setSignerDocument] = useState('');
-  const [isSigning, setIsSigning] = useState(false);
+  // Status do documento
   const [documentStatus, setDocumentStatus] = useState('RASCUNHO');
 
   // Estados de Verificação de Detalhes (Data, Hora, Local, Autoridade)
@@ -67,8 +64,340 @@ export const NewDocument: React.FC = () => {
     resumo: string;
   } | null>(null);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
+
+  // Estados para Modal de Análise e Instruções de Resposta
+  const [isAnalysisModalOpen, setIsAnalysisModalOpen] = useState(false);
+  const [isInstructionsSplitOpen, setIsInstructionsSplitOpen] = useState(false);
   const [responseInstructions, setResponseInstructions] = useState('');
   const [analysisError, setAnalysisError] = useState('');
+  const [originalGeneratedContent, setOriginalGeneratedContent] = useState('');
+  const [appliedInstructions, setAppliedInstructions] = useState<string[]>([]);
+
+  // Estados e lógica do Chat de Refinamento com IA
+  interface ChatMessage {
+    sender: 'user' | 'ia';
+    text: string;
+    timestamp: string;
+  }
+
+  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([
+    {
+      sender: 'ia',
+      text: 'Olá! Sou seu assistente de refinamento. O documento oficial foi gerado ao lado. Se precisar de ajustes (ex: alterar prazos, acrescentar parágrafos, mudar termos ou incluir detalhes), digite aqui e eu aplicarei diretamente no texto.',
+      timestamp: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
+    }
+  ]);
+  const [chatInput, setChatInput] = useState('');
+  const [isChatTyping, setIsChatTyping] = useState(false);
+
+  useEffect(() => {
+    // Rola para baixo o contêiner do chat de forma automática e suave
+    const container = document.getElementById('chat-messages-container');
+    if (container) {
+      container.scrollTop = container.scrollHeight;
+    }
+  }, [chatMessages, isChatTyping]);
+
+  const getInstructionCategory = (instruction: string): 'PRAZO' | 'ASSINATURA' | 'URGENCIA' | 'LEI' | 'DOCUMENTO' | 'CORDIALIDADE' | 'GERAL' => {
+    const lower = instruction.toLowerCase();
+    if (lower.includes('prazo') || lower.includes('dias') || lower.includes('tempo')) return 'PRAZO';
+    if (lower.includes('prefeito') || lower.includes('nome') || lower.includes('assinatura') || lower.includes('signatário') || lower.includes('cargo')) return 'ASSINATURA';
+    if (lower.includes('urgente') || lower.includes('urgência') || lower.includes('prioridade') || lower.includes('rápido')) return 'URGENCIA';
+    if (lower.includes('artigo') || lower.includes('art.') || lower.includes('lei') || lower.includes('constituição') || lower.includes('cf')) return 'LEI';
+    if (lower.includes('documento') || lower.includes('anexo') || lower.includes('cópia') || lower.includes('copia') || lower.includes('comprovante')) return 'DOCUMENTO';
+    if (lower.includes('agradecer') || lower.includes('estima') || lower.includes('consideração') || lower.includes('obrigado')) return 'CORDIALIDADE';
+    return 'GERAL';
+  };
+
+  const correctGrammarAndOrthography = (text: string): { correctedText: string; corrections: string[] } => {
+    let corrected = text;
+    const corrections: string[] = [];
+    
+    const commonErrors = [
+      { wrong: /\bpraso\b/gi, right: 'prazo' },
+      { wrong: /\bdeiz\b/gi, right: 'dez' },
+      { wrong: /\blicitacao\b/gi, right: 'licitação' },
+      { wrong: /\blicitacoes\b/gi, right: 'licitações' },
+      { wrong: /\bconstituicao\b/gi, right: 'constituição' },
+      { wrong: /\bparagrafo\b/gi, right: 'parágrafo' },
+      { wrong: /\burgencia\b/gi, right: 'urgência' },
+      { wrong: /\bprefeitura\b/gi, right: 'Prefeitura' },
+      { wrong: /\boficio\b/gi, right: 'ofício' },
+      { wrong: /\bassignar\b/gi, right: 'assinar' },
+      { wrong: /\bassignado\b/gi, right: 'assinado' },
+      { wrong: /\bassignatura\b/gi, right: 'assinatura' },
+      { wrong: /\bsemad\b/gi, right: 'SEMAD' },
+      { wrong: /\bsemed\b/gi, right: 'SEMED' },
+      { wrong: /\bprovidencia\b/gi, right: 'providência' },
+      { wrong: /\bprovidencias\b/gi, right: 'providências' },
+      { wrong: /\bcomunicacao\b/gi, right: 'comunicação' },
+      { wrong: /\bpublico\b/gi, right: 'público' },
+      { wrong: /\bpublicos\b/gi, right: 'públicos' },
+      { wrong: /\bexigir\b/gi, right: 'exigir' },
+      { wrong: /\bexiga\b/gi, right: 'exija' },
+      { wrong: /\brelatorio\b/gi, right: 'relatório' },
+      { wrong: /\brelatorios\b/gi, right: 'relatórios' },
+      { wrong: /\bpdf\b/g, right: 'PDF' },
+      { wrong: /\bword\b/g, right: 'Word' },
+      { wrong: /\bdoc\b/g, right: 'DOC' },
+    ];
+    
+    commonErrors.forEach(({ wrong, right }) => {
+      if (wrong.test(corrected)) {
+        corrected = corrected.replace(wrong, right);
+        corrections.push(`"${right}"`);
+      }
+    });
+    
+    return { correctedText: corrected, corrections };
+  };
+
+  const reformulateTextWithInstruction = (currentText: string, instruction: string): string => {
+    const cleanInstruction = instruction.toLowerCase().trim();
+    
+    const isCavalgada = currentText.toLowerCase().includes('cavalgada') || currentText.toLowerCase().includes('policiamento') || currentText.toLowerCase().includes('pm');
+    const isSaude = currentText.toLowerCase().includes('hospital') || currentText.toLowerCase().includes('medicamento') || currentText.toLowerCase().includes('insumos');
+    const isOficioResposta = currentText.toLowerCase().includes('ofício requisitório') || currentText.toLowerCase().includes('resposta ao ofício') || docType === 'RESPOSTA_OFICIO';
+
+    // 1. ALTERAÇÃO DE DATAS, NOMES OU VALORES (Substituição no local correspondente)
+    // 1.a. Alteração de Datas
+    if (cleanInstruction.includes('data') || cleanInstruction.includes('dia') || cleanInstruction.includes('para o dia') || cleanInstruction.includes('mude a data')) {
+      const dateMatch = instruction.match(/\d{2}\/\d{2}\/\d{4}/) || instruction.match(/\d{2}\s+de\s+[a-zA-ZçÇ]+\s+de\s+\d{4}/i) || instruction.match(/\d{2}\/\d{2}/);
+      if (dateMatch) {
+        const newDate = dateMatch[0];
+        let updatedText = currentText.replace(/\d{2}\/\d{2}\/\d{4}/g, newDate)
+                                     .replace(/\d{2}\s+de\s+[a-zA-ZçÇ]+\s+de\s+\d{4}/gi, newDate);
+        if (updatedText !== currentText) return updatedText;
+      }
+    }
+
+    // 1.b. Alteração de Valores Monetários
+    if (cleanInstruction.includes('valor') || cleanInstruction.includes('preço') || cleanInstruction.includes('custo') || cleanInstruction.includes('r$')) {
+      const moneyMatch = instruction.match(/R\$\s*[\d\.,]+/i) || instruction.match(/\d+[\d\.,]*/);
+      if (moneyMatch) {
+        const newValue = moneyMatch[0].includes('R$') ? moneyMatch[0] : `R$ ${moneyMatch[0]}`;
+        let updatedText = currentText.replace(/R\$\s*[\d\.,]+/g, newValue);
+        if (updatedText !== currentText) return updatedText;
+      }
+    }
+
+    // 1.c. Alteração de Prazos
+    if (cleanInstruction.includes('prazo') || cleanInstruction.includes('dias') || cleanInstruction.includes('tempo')) {
+      const daysMatch = cleanInstruction.match(/\d+/);
+      const newDays = daysMatch ? daysMatch[0] : '15';
+      
+      let newText = currentText.replace(/prazos?\s+de\s+\d+\s+dias/gi, `prazo de ${newDays} dias`)
+                               .replace(/prazos?\s+de\s+cinco\s+dias/gi, `prazo de ${newDays} dias`)
+                               .replace(/\d+\s+dias\s+úteis/gi, `${newDays} dias úteis`)
+                               .replace(/5\s+dias/gi, `${newDays} dias`);
+                               
+      if (newText === currentText) {
+        if (isOficioResposta) {
+          newText = currentText.replace('à inteira disposição para prestar quaisquer esclarecimentos complementares', `à inteira disposição, assinalando-se o prazo improrrogável de ${newDays} dias para o devido cumprimento das obrigações e esclarecimentos complementares`);
+        } else if (isCavalgada) {
+          newText = currentText.replace('solicitar o valioso e imprescindível apoio', `solicitar, com a devida antecedência e observando o prazo operacional de ${newDays} dias, o valioso e imprescindível apoio`);
+        } else {
+          const lines = currentText.split('\n');
+          const insertIdx = lines.findIndex(l => l.toLowerCase().includes('atenciosamente') || l.includes('______'));
+          if (insertIdx !== -1) {
+            lines.splice(insertIdx - 1, 0, `Diante do exposto, assinala-se o prazo improrrogável de ${newDays} dias para o devido cumprimento e manifestação acerca dos termos ora aduzidos.`);
+            newText = lines.join('\n');
+          } else {
+            newText = currentText + `\n\nFica estabelecido o prazo de ${newDays} dias úteis para a apresentação dos documentos requeridos.`;
+          }
+        }
+      }
+      return newText;
+    }
+    
+    // 1.d. Alteração de Assinaturas/Prefeito/Signatário
+    if (cleanInstruction.includes('prefeito') || cleanInstruction.includes('nome') || cleanInstruction.includes('assinatura') || cleanInstruction.includes('signatário') || cleanInstruction.includes('cargo')) {
+      if (cleanInstruction.includes('secretário') || cleanInstruction.includes('secretaria') || cleanInstruction.includes('interino')) {
+        return currentText.replace(/Prefeito Municipal/gi, 'Secretário Municipal de Administração')
+                           .replace(/Carlos Silva/gi, profile?.name || 'Secretário Responsável');
+      }
+      return currentText.replace(/Prefeito Municipal/gi, 'Prefeito Municipal (Em Exercício)')
+                         .replace(/Carlos Silva/gi, profile?.name || 'Servidor Responsável');
+    }
+
+    // 2. REMOÇÃO DE TRECHOS (Eliminação inteligente)
+    if (cleanInstruction.includes('remova') || cleanInstruction.includes('elimine') || cleanInstruction.includes('retire') || cleanInstruction.includes('apague') || cleanInstruction.includes('exclua') || cleanInstruction.includes('sem o trecho')) {
+      const lines = currentText.split('\n');
+      const keywords = ['lei', 'artigo', 'art.', 'cavalgada', 'urgência', 'urgente', 'agradecimento', 'estima', 'parágrafo', 'paragrafo', 'nutrição', 'saúde', 'insumo'];
+      const keywordToExclude = keywords.find(kw => cleanInstruction.includes(kw));
+      
+      if (keywordToExclude) {
+        const filteredLines = lines.filter((line, index) => {
+          const lowerLine = line.toLowerCase();
+          if (index < 5 || index > lines.length - 6) return true;
+          if (lowerLine.includes(keywordToExclude)) {
+            if (keywordToExclude === 'urgente' || keywordToExclude === 'urgência') {
+              return !lowerLine.includes('assunto:');
+            }
+            return false;
+          }
+          return true;
+        });
+        let cleanText = filteredLines.join('\n');
+        cleanText = cleanText.replace(/\n{3,}/g, '\n\n');
+        return cleanText;
+      }
+    }
+
+    // 3. MUDANÇA DE TOM (Reescrita de tom)
+    if (cleanInstruction.includes('tom') || cleanInstruction.includes('estilo') || cleanInstruction.includes('formal') || cleanInstruction.includes('assertivo') || cleanInstruction.includes('enérgico') || cleanInstruction.includes('amigável') || cleanInstruction.includes('cordial')) {
+      let updatedText = currentText;
+      if (cleanInstruction.includes('assertivo') || cleanInstruction.includes('enérgico') || cleanInstruction.includes('cobrança') || cleanInstruction.includes('firme')) {
+        updatedText = updatedText.replace(/Prezado\(a\) Senhor\(a\),/gi, 'Excelentíssimo(a) Senhor(a),')
+                                 .replace(/Cumprimentando-o\(a\) cordialmente/gi, 'Em cumprimento às normas vigentes de fiscalização')
+                                 .replace(/solicitamos/gi, 'requisita-se em caráter imperativo')
+                                 .replace(/permanecemos à inteira disposição/gi, 'reiteramos a necessidade de atendimento imediato');
+      } else if (cleanInstruction.includes('cordial') || cleanInstruction.includes('amigável') || cleanInstruction.includes('gentil')) {
+        updatedText = updatedText.replace(/solicitamos/gi, 'solicitamos gentilmente')
+                                 .replace(/improrrogável/gi, 'solicitado dentro do cronograma administrativo')
+                                 .replace(/sob pena de/gi, 'visando o melhor alinhamento com');
+      } else if (cleanInstruction.includes('formal') || cleanInstruction.includes('jurídico') || cleanInstruction.includes('polido')) {
+        updatedText = updatedText.replace(/Prezado Comandante,/gi, 'Excelentíssimo Senhor Comandante,')
+                                 .replace(/Atenciosamente,/gi, 'Aproveitamos o ensejo para externar nossos protestos de elevada estima e consideração.\n\nRespeitosamente,');
+      }
+      return updatedText;
+    }
+
+    // 4. ADICIONAR INFORMAÇÃO (Inserção no local mais adequado)
+    let baseText = instruction;
+    baseText = baseText.replace(/^(adicione|coloque|escreva|fale|diga|peça|solicite|insira)\s+que\s+/i, '')
+                       .replace(/^(adicione|coloque|escreva|fale|diga|peça|solicite|insira)\s+/i, '');
+    baseText = baseText.charAt(0).toUpperCase() + baseText.slice(1);
+    
+    let formalParagraph = '';
+    if (isOficioResposta) {
+      formalParagraph = `Insta registrar, sob o prisma das justificativas operacionais demandadas, que a Administração Municipal prioriza o pleno esclarecimento acerca de ${baseText.charAt(0).toLowerCase() + baseText.slice(1)}, de modo a resguardar o interesse público e a celeridade procedimental.`;
+    } else if (isCavalgada) {
+      formalParagraph = `Com vistas à otimização das ações preventivas coordenadas pela municipalidade, enfatiza-se a necessidade de que ${baseText.charAt(0).toLowerCase() + baseText.slice(1)}, garantindo a segurança de todos os participantes do desfile.`;
+    } else if (isSaude) {
+      formalParagraph = `Ressalta-se que, visando mitigar quaisquer riscos de desabastecimento na rede de saúde, providenciou-se a articulação técnica para que ${baseText.charAt(0).toLowerCase() + baseText.slice(1)}, assegurando o pleno atendimento ambulatorial.`;
+    } else {
+      formalParagraph = `Cumpre destacar, por oportuno, que as ações em andamento consideram fundamental a diretriz de que ${baseText.charAt(0).toLowerCase() + baseText.slice(1)}, em estrita observância à regularidade e conformidade dos atos.`;
+    }
+    
+    const lines = currentText.split('\n');
+    const endIdx = lines.findIndex(l => l.toLowerCase().includes('atenciosamente') || l.includes('______'));
+    if (endIdx !== -1) {
+      lines.splice(endIdx - 1, 0, formalParagraph);
+      return lines.join('\n');
+    } else {
+      return `${currentText}\n\n${formalParagraph}`;
+    }
+  };
+
+  const handleSendChatMessage = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!chatInput.trim()) return;
+
+    const userText = chatInput.trim();
+    const timeStr = new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+    
+    // Adiciona mensagem do usuário ao histórico visual
+    setChatMessages(prev => [...prev, { sender: 'user', text: userText, timestamp: timeStr }]);
+    setChatInput('');
+    setIsChatTyping(true);
+
+    // Tratamento primário de erro de gramática, ortografia e escrita informal
+    const { correctedText, corrections } = correctGrammarAndOrthography(userText);
+
+    // Simula inteligência artificial aplicando a alteração no documento
+    setTimeout(() => {
+      let responseText = 'Entendido! Reelaborei o texto do documento oficial ao lado integrando formalmente a sua instrução.';
+      
+      if (corrections.length > 0) {
+        responseText = `Análise de ortografia concluída: identifiquei e tratei pequenos desvios gramaticais em sua instrução (ex: corrigido ${corrections.join(', ')}). Com a diretriz ajustada, reescrevi o documento oficial garantindo a coerência e integridade do texto.`;
+      } else {
+        const lowerText = correctedText.toLowerCase();
+        if (lowerText.includes('prazo') || lowerText.includes('dias') || lowerText.includes('tempo')) {
+          const daysMatch = correctedText.match(/\d+/);
+          const newDays = daysMatch ? daysMatch[0] : '15';
+          responseText = `Com certeza! Reelaborei o documento atualizando o prazo de cumprimento para ${newDays} dias úteis de forma oficial.`;
+        } else if (lowerText.includes('prefeito') || lowerText.includes('nome') || lowerText.includes('assinatura')) {
+          responseText = 'Ajuste concluído! Reformulei o bloco de assinaturas para incluir as credenciais do perfil ativo.';
+        } else if (lowerText.includes('urgente') || lowerText.includes('urgência') || lowerText.includes('prioridade')) {
+          responseText = 'Entendido! Inseri uma nova declaração formal de urgência e tramitação prioritária no corpo do texto.';
+        } else if (lowerText.includes('artigo') || lowerText.includes('art.') || lowerText.includes('lei')) {
+          responseText = 'Entendido! Reelaborei a fundamentação jurídica do documento oficial citando a legislação pertinente.';
+        } else if (lowerText.includes('documento') || lowerText.includes('anexo') || lowerText.includes('cópia')) {
+          responseText = 'Pronto! Inseri uma requisição formal para anexação dos comprovantes e documentos adicionais solicitados.';
+        } else if (lowerText.includes('agradecer') || lowerText.includes('estima') || lowerText.includes('consideração')) {
+          responseText = 'Ajuste feito! Reformulei o encerramento do texto incluindo cumprimentos cordiais formais.';
+        }
+      }
+
+      setAppliedInstructions(prevInstructions => {
+        const category = getInstructionCategory(correctedText);
+        
+        // Se a nova categoria de instrução for diferente de GERAL, filtramos as diretrizes anteriores da mesma categoria para evitar conflitos!
+        let filteredInstructions = prevInstructions;
+        if (category !== 'GERAL') {
+          filteredInstructions = prevInstructions.filter(instr => getInstructionCategory(instr) !== category);
+        }
+        
+        const nextInstructions = [...filteredInstructions, correctedText];
+        
+        setGeneratedContent(() => {
+          let currentDocText = originalGeneratedContent;
+          nextInstructions.forEach(instr => {
+            currentDocText = reformulateTextWithInstruction(currentDocText, instr);
+          });
+          return currentDocText;
+        });
+
+        return nextInstructions;
+      });
+
+      setChatMessages(prev => [...prev, {
+        sender: 'ia',
+        text: responseText,
+        timestamp: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
+      }]);
+      setIsChatTyping(false);
+    }, 1200);
+  };
+
+  // Efeito para carregar o documento em modo de edição (do localStorage ou da API)
+  useEffect(() => {
+    const editId = searchParams.get('edit');
+    if (editId) {
+      // 1. Tenta carregar do localStorage
+      const localDocsRaw = localStorage.getItem('legis_documents');
+      const localDocs = localDocsRaw ? JSON.parse(localDocsRaw) : [];
+      const foundLocal = localDocs.find((d: any) => String(d.id) === String(editId));
+      
+      if (foundLocal) {
+        setTitle(foundLocal.title);
+        setDocType(foundLocal.type);
+        setGeneratedContent(foundLocal.content);
+        setOriginalGeneratedContent(foundLocal.content);
+        setAppliedInstructions([]);
+        setDocumentStatus(foundLocal.status);
+      }
+      
+      // 2. Tenta carregar da API (se houver API ativa)
+      const fetchDocFromApi = async () => {
+        try {
+          const response = await api.get<any>(`/documents/${editId}`);
+          if (response.data) {
+            setTitle(response.data.title);
+            setDocType(response.data.type);
+            setGeneratedContent(response.data.content);
+            setOriginalGeneratedContent(response.data.content);
+            setAppliedInstructions([]);
+            setDocumentStatus(response.data.status);
+          }
+        } catch (err) {
+          console.log('Documento não encontrado na API, utilizando versão local:', err);
+        }
+      };
+      fetchDocFromApi();
+    }
+  }, [searchParams]);
 
   const handleAnalyzeOficio = async () => {
     if (!attachedFile) {
@@ -108,6 +437,8 @@ export const NewDocument: React.FC = () => {
           resumo,
         });
         setIsAnalyzing(false);
+        setIsAnalysisModalOpen(true);
+        setIsInstructionsSplitOpen(false);
       }, 1500);
     } catch (err) {
       console.error(err);
@@ -156,22 +487,24 @@ export const NewDocument: React.FC = () => {
   ];
 
   useEffect(() => {
-    // Títulos automáticos com base no tipo
-    const typeLabel =
-      docType === 'OFICIO'
-        ? 'Ofício Circular'
-        : docType === 'MEMORANDO'
-        ? 'Memorando'
-        : docType === 'RESPOSTA_OFICIO'
-        ? 'Resposta a Ofício'
-        : 'Decreto Municipal';
-    setTitle(`${typeLabel} nº .../${new Date().getFullYear()}`);
+    // Títulos automáticos com base no tipo - apenas se NÃO estiver editando
+    if (!searchParams.get('edit')) {
+      const typeLabel =
+        docType === 'OFICIO'
+          ? 'Ofício Circular'
+          : docType === 'MEMORANDO'
+          ? 'Memorando'
+          : docType === 'RESPOSTA_OFICIO'
+          ? 'Resposta a Ofício'
+          : 'Decreto Municipal';
+      setTitle(`${typeLabel} nº .../${new Date().getFullYear()}`);
+    }
 
     // Limpa estados específicos de resposta a ofício ao mudar o tipo
     setAnalysisResult(null);
     setResponseInstructions('');
     setAnalysisError('');
-  }, [docType]);
+  }, [docType, searchParams]);
 
   const verifyPromptDetails = (text: string) => {
     const missing: string[] = [];
@@ -251,6 +584,8 @@ export const NewDocument: React.FC = () => {
     const finalPrompt = overridePrompt || (docType === 'RESPOSTA_OFICIO' ? responseInstructions : promptText);
     setIsGenerating(true);
     setGeneratedContent('');
+    setIsAnalysisModalOpen(false);
+    setIsInstructionsSplitOpen(false);
 
     try {
       const { data } = await api.post('/documents/generate-ia', {
@@ -260,6 +595,8 @@ export const NewDocument: React.FC = () => {
         secretariatName: profile?.secretariat?.name,
       });
       setGeneratedContent(data.content);
+      setOriginalGeneratedContent(data.content);
+      setAppliedInstructions([]);
     } catch (err) {
       console.error('Erro ao gerar com IA:', err);
       // Fallback estático e contextualizado em caso de API offline
@@ -424,6 +761,8 @@ Atenciosamente,`;
 
         const fallbackText = `MUNICÍPIO DE ${munNameNormalized.toUpperCase()}\nSECRETARIA MUNICIPAL DE ${secNameNormalized.toUpperCase()}\n\n${typeLabel} Nº 124/${year}\n\n${bodyText}\n\n\n\n\n__________________________________\n${profile?.name || 'Servidor Responsável'}\n${secNameNormalized}`;
         setGeneratedContent(fallbackText);
+        setOriginalGeneratedContent(fallbackText);
+        setAppliedInstructions([]);
       }, 1500);
     } finally {
       setIsGenerating(false);
@@ -432,49 +771,57 @@ Atenciosamente,`;
 
   const handleSaveDocument = async (status: string = 'RASCUNHO') => {
     setIsSaving(true);
+    const docId = searchParams.get('edit') || Math.random().toString(36).substring(2, 9);
+    const newDoc = {
+      id: docId,
+      title: title || `Documento Sem Título`,
+      content: generatedContent,
+      type: docType,
+      status,
+      createdAt: new Date().toISOString(),
+      authorName: profile?.name || 'Servidor Municipal',
+    };
+
+    // Persistência local (localStorage) como garantia/demonstração
+    const localDocsRaw = localStorage.getItem('legis_documents');
+    const localDocs = localDocsRaw ? JSON.parse(localDocsRaw) : [];
+    const editId = searchParams.get('edit');
+    if (editId) {
+      const updated = localDocs.map((d: any) => String(d.id) === String(editId) ? { ...d, ...newDoc } : d);
+      localStorage.setItem('legis_documents', JSON.stringify(updated));
+    } else {
+      localDocs.unshift(newDoc);
+      localStorage.setItem('legis_documents', JSON.stringify(localDocs));
+    }
+
     try {
-      await api.post('/documents', {
-        title,
-        content: generatedContent,
-        type: docType,
-        status,
-      });
+      if (editId) {
+        // Se for edição, chama PUT na API
+        await api.put(`/documents/${editId}`, {
+          title: newDoc.title,
+          content: newDoc.content,
+          type: newDoc.type,
+          status: newDoc.status,
+        });
+      } else {
+        // Se for novo, chama POST
+        await api.post('/documents', {
+          title: newDoc.title,
+          content: newDoc.content,
+          type: newDoc.type,
+          status: newDoc.status,
+        });
+      }
       setDocumentStatus(status);
       alert(`Documento salvo com sucesso como ${status}!`);
-      if (status === 'RASCUNHO') navigate('/documentos');
+      navigate('/documentos');
     } catch (err) {
-      console.error('Erro ao salvar documento:', err);
-      // Simulação
-      setTimeout(() => {
-        setDocumentStatus(status);
-        alert(`[Demonstração] Documento gravado localmente como ${status}!`);
-        if (status === 'RASCUNHO') navigate('/documentos');
-      }, 500);
+      console.error('Erro ao salvar documento na API:', err);
+      setDocumentStatus(status);
+      alert(`[Demonstração] Documento gravado localmente como ${status}!`);
+      navigate('/documentos');
     } finally {
       setIsSaving(false);
-    }
-  };
-
-  const handleSignDocumentSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setIsSigning(true);
-    try {
-      // Simula chamada de assinatura
-      await api.post('/documents/sign', {
-        signerName,
-        signerDocument,
-        signatureHash: Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15),
-      });
-      setIsSignatureModalOpen(false);
-      handleSaveDocument('ASSINADO');
-    } catch (err) {
-      console.error('Erro ao assinar:', err);
-      setTimeout(() => {
-        setIsSignatureModalOpen(false);
-        handleSaveDocument('ASSINADO');
-      }, 800);
-    } finally {
-      setIsSigning(false);
     }
   };
 
@@ -526,12 +873,13 @@ Atenciosamente,`;
                 Imprimir / PDF
               </Button>
               <Button
-                variant="gold"
+                variant="primary"
                 size="sm"
-                leftIcon={<Signature size={16} />}
-                onClick={() => setIsSignatureModalOpen(true)}
+                leftIcon={<CheckCircle size={16} />}
+                onClick={() => handleSaveDocument('FINALIZADO')}
+                isLoading={isSaving && documentStatus === 'FINALIZADO'}
               >
-                Assinar Digitalmente
+                Finalizar Documento
               </Button>
             </>
           )}
@@ -587,105 +935,77 @@ Atenciosamente,`;
                       />
                     </label>
                   ) : (
-                    <div className="flex items-center justify-between border border-slate-200 rounded-lg p-3 bg-white shadow-xs">
-                      <div className="flex items-center gap-3">
-                        <div className="p-2 bg-slate-50 text-gov-blue rounded-lg">
-                          <File size={18} />
+                    <div className="flex flex-col gap-3">
+                      <div className="flex items-center justify-between border border-slate-200 rounded-lg p-3 bg-white shadow-xs">
+                        <div className="flex items-center gap-3">
+                          <div className="p-2 bg-slate-50 text-gov-blue rounded-lg">
+                            <File size={18} />
+                          </div>
+                          <div className="flex flex-col">
+                            <span className="text-xs font-semibold text-slate-900 truncate max-w-xs">
+                              {attachedFile.name}
+                            </span>
+                            <span className="text-[10px] text-slate-400">
+                              {(attachedFile.size / 1024 / 1024).toFixed(2)} MB
+                            </span>
+                          </div>
                         </div>
-                        <div className="flex flex-col">
-                          <span className="text-xs font-semibold text-slate-900 truncate max-w-xs">
-                            {attachedFile.name}
-                          </span>
-                          <span className="text-[10px] text-slate-400">
-                            {(attachedFile.size / 1024 / 1024).toFixed(2)} MB
-                          </span>
-                        </div>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="!p-1.5 text-red-500 hover:bg-red-50 rounded-full"
+                          onClick={() => {
+                            setAttachedFile(null);
+                            setAnalysisResult(null);
+                            setResponseInstructions('');
+                          }}
+                        >
+                          <X size={16} />
+                        </Button>
                       </div>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        className="!p-1.5 text-red-500 hover:bg-red-50 rounded-full"
-                        onClick={() => {
-                          setAttachedFile(null);
-                          setAnalysisResult(null);
-                          setResponseInstructions('');
-                        }}
-                      >
-                        <X size={16} />
-                      </Button>
+
+                      {/* Botão de Análise (se anexou, mas não analisou) */}
+                      {!analysisResult && (
+                        <Button
+                          variant="primary"
+                          onClick={handleAnalyzeOficio}
+                          isLoading={isAnalyzing}
+                          leftIcon={<Sparkles size={16} />}
+                          className="w-full"
+                        >
+                          Analisar Ofício por IA
+                        </Button>
+                      )}
+
+                      {/* Banner do Ofício Analisado */}
+                      {analysisResult && (
+                        <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-3.5 flex items-center justify-between text-left">
+                          <div className="flex items-center gap-2">
+                            <Sparkles size={16} className="text-emerald-600 animate-pulse" />
+                            <div>
+                              <p className="text-xs font-bold text-emerald-800 uppercase">Ofício Analisado por IA</p>
+                              <p className="text-[11px] text-emerald-600 mt-0.5 truncate max-w-[200px]">
+                                {analysisResult.tema}
+                              </p>
+                            </div>
+                          </div>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="text-emerald-700 border-emerald-300 hover:bg-emerald-100/50 shrink-0 font-semibold"
+                            leftIcon={<Sparkles size={12} />}
+                            onClick={() => setIsAnalysisModalOpen(true)}
+                          >
+                            Ver Análise
+                          </Button>
+                        </div>
+                      )}
                     </div>
                   )}
                   {analysisError && (
                     <p className="text-xs text-red-500 font-medium mt-1">{analysisError}</p>
                   )}
                 </div>
-
-                {/* Botão de Análise (se anexou, mas não analisou) */}
-                {attachedFile && !analysisResult && (
-                  <Button
-                    variant="primary"
-                    onClick={handleAnalyzeOficio}
-                    isLoading={isAnalyzing}
-                    leftIcon={<Sparkles size={16} />}
-                    className="w-full mt-2"
-                  >
-                    Analisar Ofício por IA
-                  </Button>
-                )}
-
-                {/* Exibição da Análise e Campo de Resposta */}
-                {analysisResult && (
-                  <div className="flex flex-col gap-4 animate-scale-up">
-                    <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 flex flex-col gap-3 text-left">
-                      <h4 className="text-xs font-bold text-slate-700 uppercase tracking-wider border-b border-slate-200 pb-1.5 flex items-center gap-1.5">
-                        <Sparkles size={14} className="text-gov-gold" /> Análise do Ofício Concluída
-                      </h4>
-                      <div className="grid grid-cols-2 gap-3 text-xs">
-                        <div>
-                          <span className="font-semibold text-slate-500 block">Órgão Emissor:</span>
-                          <span className="text-slate-800 font-medium">{analysisResult.orgao}</span>
-                        </div>
-                        <div>
-                          <span className="font-semibold text-slate-500 block">Autoridade:</span>
-                          <span className="text-slate-800 font-medium">{analysisResult.autoridade}</span>
-                        </div>
-                      </div>
-                      <div className="text-xs">
-                        <span className="font-semibold text-slate-500 block">Tema Principal:</span>
-                        <span className="text-slate-800 font-medium">{analysisResult.tema}</span>
-                      </div>
-                      <div className="text-xs bg-white border border-slate-100 rounded-lg p-2.5">
-                        <span className="font-semibold text-slate-500 block mb-1">Resumo da Solicitação:</span>
-                        <p className="text-slate-600 leading-relaxed">{analysisResult.resumo}</p>
-                      </div>
-                    </div>
-
-                    <div className="flex flex-col gap-1.5 text-left">
-                      <label className="text-xs font-semibold text-slate-700 uppercase tracking-wider">
-                        Instruções para a Resposta (Diretriz do Servidor)
-                      </label>
-                      <textarea
-                        value={responseInstructions}
-                        onChange={(e) => setResponseInstructions(e.target.value)}
-                        rows={4}
-                        placeholder="Ex: Informe que os relatórios técnicos solicitados serão enviados pela SEMAD em até 5 dias úteis, justificando que estão em fase final de auditoria interna..."
-                        className="w-full rounded-lg border border-slate-200 bg-white px-4 py-3 text-sm text-slate-900 transition-all focus:border-gov-blue focus:ring-1 focus:ring-gov-blue outline-none placeholder:text-slate-400"
-                        required
-                      />
-                    </div>
-
-                    <Button
-                      variant="primary"
-                      onClick={handleRequestGeneration}
-                      isLoading={isGenerating}
-                      disabled={!responseInstructions}
-                      leftIcon={<Sparkles size={16} />}
-                      className="w-full mt-2"
-                    >
-                      Gerar Resposta por IA
-                    </Button>
-                  </div>
-                )}
               </div>
             ) : (
               // Fluxo padrão para outros documentos
@@ -762,6 +1082,107 @@ Atenciosamente,`;
               </div>
             )}
           </Card>
+
+          {/* Chat de Refinamento com IA */}
+          {generatedContent && (
+            <Card className="flex flex-col gap-4 border border-slate-100 p-5 shadow-sm">
+              <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+                <div className="flex items-center gap-2">
+                  <div className="relative">
+                    <span className="flex h-2.5 w-2.5">
+                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                      <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500"></span>
+                    </span>
+                  </div>
+                  <h3 className="text-sm font-bold text-slate-800 flex items-center gap-1.5">
+                    <MessageSquare size={16} className="text-gov-blue animate-pulse" />
+                    Assistente de Refinamento (IA)
+                  </h3>
+                </div>
+                <span className="text-[10px] bg-slate-100 text-slate-500 px-2 py-0.5 rounded-full font-bold uppercase tracking-wider">
+                  Documento Gerado
+                </span>
+              </div>
+
+              {/* Lista de Diretrizes Ativas */}
+              {appliedInstructions.length > 0 && (
+                <div className="flex flex-wrap gap-1.5 px-1 pb-1">
+                  <span className="text-[9px] text-slate-400 font-bold uppercase tracking-wider self-center mr-1">
+                    Diretrizes Ativas:
+                  </span>
+                  {appliedInstructions.map((instr, idx) => (
+                    <span
+                      key={idx}
+                      className="text-[9px] bg-slate-100 border border-slate-200 text-slate-600 px-2 py-0.5 rounded-md font-medium truncate max-w-[120px]"
+                      title={instr}
+                    >
+                      {instr}
+                    </span>
+                  ))}
+                </div>
+              )}
+
+              {/* Histórico do Chat */}
+              <div className="flex flex-col gap-3 max-h-[220px] overflow-y-auto p-1 bg-slate-50/50 rounded-xl border border-slate-100 p-3.5" id="chat-messages-container">
+                {chatMessages.map((msg, idx) => (
+                  <div
+                    key={idx}
+                    className={`flex flex-col gap-1 max-w-[85%] ${
+                      msg.sender === 'user' ? 'self-end items-end' : 'self-start items-start'
+                    }`}
+                  >
+                    <div className="flex items-center gap-1">
+                      <span className="text-[9px] font-bold text-slate-400 uppercase tracking-wider">
+                        {msg.sender === 'user' ? (profile?.name?.split(' ')[0] || 'Servidor') : 'Legis AI'}
+                      </span>
+                      <span className="text-[8px] text-slate-400">• {msg.timestamp}</span>
+                    </div>
+                    <div
+                      className={`text-xs p-3 rounded-2xl leading-relaxed text-left ${
+                        msg.sender === 'user'
+                          ? 'bg-gov-blue text-white rounded-tr-none'
+                          : 'bg-white text-slate-700 border border-slate-200/80 rounded-tl-none shadow-xs'
+                      }`}
+                    >
+                      {msg.text}
+                    </div>
+                  </div>
+                ))}
+                
+                {isChatTyping && (
+                  <div className="flex flex-col gap-1 self-start items-start max-w-[85%]">
+                    <span className="text-[9px] font-bold text-slate-400 uppercase tracking-wider">Legis AI</span>
+                    <div className="bg-white border border-slate-200/80 text-xs p-3 rounded-2xl rounded-tl-none flex items-center gap-1 shadow-xs">
+                      <span className="w-1.5 h-1.5 bg-slate-400 rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
+                      <span className="w-1.5 h-1.5 bg-slate-400 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
+                      <span className="w-1.5 h-1.5 bg-slate-400 rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Input do Chat */}
+              <form onSubmit={handleSendChatMessage} className="flex gap-2">
+                <input
+                  type="text"
+                  value={chatInput}
+                  onChange={(e) => setChatInput(e.target.value)}
+                  placeholder="Solicite alterações no documento..."
+                  className="flex-1 rounded-lg border border-slate-200 bg-white px-3.5 py-2 text-xs text-slate-900 transition-all focus:border-gov-blue focus:ring-1 focus:ring-gov-blue outline-none placeholder:text-slate-400"
+                  disabled={isChatTyping}
+                />
+                <Button
+                  type="submit"
+                  variant="primary"
+                  size="sm"
+                  className="px-3 shrink-0"
+                  disabled={!chatInput.trim() || isChatTyping}
+                >
+                  <Send size={14} />
+                </Button>
+              </form>
+            </Card>
+          )}
         </div>
 
         {/* Painel Direito: Pré-visualização A4 */}
@@ -1001,55 +1422,6 @@ Atenciosamente,`;
         </div>
       </div>
 
-      {/* Modal de Assinatura Digital */}
-      <Modal
-        isOpen={isSignatureModalOpen}
-        onClose={() => setIsSignatureModalOpen(false)}
-        title="Assinatura Digital de Documento"
-      >
-        <form onSubmit={handleSignDocumentSubmit} className="flex flex-col gap-5 text-left">
-          <p className="text-sm text-slate-500 leading-relaxed">
-            Esta assinatura utiliza chave criptográfica e identificará o servidor legalmente responsável. Certifique-se de que os dados estão corretos.
-          </p>
-
-          <Input
-            label="Nome Completo do Signatário"
-            required
-            value={signerName}
-            onChange={(e) => setSignerName(e.target.value)}
-          />
-
-          <Input
-            label="Documento de Identificação (CPF ou Matrícula)"
-            required
-            placeholder="000.000.000-00"
-            value={signerDocument}
-            onChange={(e) => setSignerDocument(e.target.value)}
-          />
-
-          <div className="bg-slate-50 border border-slate-100 rounded-lg p-4 flex flex-col gap-2">
-            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
-              Termos de Assinatura
-            </span>
-            <p className="text-xs text-slate-500 leading-relaxed">
-              Ao clicar em Assinar, o servidor declara a autenticidade das informações contidas no documento e registra sua assinatura eletrônica no banco de dados do município, vinculando o hash gerado ao seu perfil público.
-            </p>
-          </div>
-
-          <div className="flex justify-end gap-3 mt-4">
-            <Button
-              type="button"
-              variant="outline"
-              onClick={() => setIsSignatureModalOpen(false)}
-            >
-              Cancelar
-            </Button>
-            <Button type="submit" variant="gold" isLoading={isSigning}>
-              Confirmar Assinatura
-            </Button>
-          </div>
-        </form>
-      </Modal>
 
       {/* Modal de Detalhes Requeridos pela IA */}
       <Modal
@@ -1126,6 +1498,123 @@ Atenciosamente,`;
             </Button>
           </div>
         </form>
+      </Modal>
+
+      {/* Modal de Análise e Instruções de Resposta (Split-Pane Premium) */}
+      <Modal
+        isOpen={isAnalysisModalOpen}
+        onClose={() => {
+          setIsAnalysisModalOpen(false);
+          setIsInstructionsSplitOpen(false);
+        }}
+        title="Análise Inteligente de Ofício Recebido"
+        size={isInstructionsSplitOpen ? 'xl' : 'lg'}
+      >
+        <div className="flex flex-col gap-6 text-left">
+          <div className={`grid grid-cols-1 ${isInstructionsSplitOpen ? 'lg:grid-cols-2' : ''} gap-6 transition-all duration-300`}>
+            
+            {/* PAINEL DA ESQUERDA: Resultado da Análise da IA */}
+            <div className="flex flex-col gap-4 bg-slate-50 border border-slate-200 rounded-xl p-5 shadow-sm h-[420px]">
+              <h4 className="text-xs font-bold text-slate-700 uppercase tracking-wider border-b border-slate-200 pb-2 flex items-center gap-2">
+                <Sparkles size={16} className="text-gov-gold animate-pulse" /> 
+                Dados Extraídos do Ofício
+              </h4>
+
+              {analysisResult && (
+                <div className="flex flex-col gap-3 flex-1 justify-between overflow-hidden">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+                    <div>
+                      <span className="font-bold text-slate-400 block uppercase tracking-wide mb-0.5">Órgão Emissor:</span>
+                      <span className="text-slate-800 font-semibold bg-white border border-slate-100 rounded-md px-2.5 py-1.5 block leading-relaxed shadow-sm truncate animate-none" title={analysisResult.orgao}>
+                        {analysisResult.orgao}
+                      </span>
+                    </div>
+                    <div>
+                      <span className="font-bold text-slate-400 block uppercase tracking-wide mb-0.5">Autoridade Solicitante:</span>
+                      <span className="text-slate-800 font-semibold bg-white border border-slate-100 rounded-md px-2.5 py-1.5 block leading-relaxed shadow-sm truncate animate-none" title={analysisResult.autoridade}>
+                        {analysisResult.autoridade}
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="text-xs">
+                    <span className="font-bold text-slate-400 block uppercase tracking-wide mb-0.5">Assunto/Tema Principal:</span>
+                    <span className="text-slate-800 font-semibold bg-white border border-slate-100 rounded-md px-2.5 py-1.5 block leading-relaxed shadow-sm truncate animate-none" title={analysisResult.tema}>
+                      {analysisResult.tema}
+                    </span>
+                  </div>
+
+                  <div className="text-xs flex-1 flex flex-col overflow-hidden min-h-0">
+                    <span className="font-bold text-slate-400 block uppercase tracking-wide mb-1">Resumo das Solicitações e Prazos:</span>
+                    <div className="text-slate-600 bg-white border border-slate-100 rounded-lg p-3 leading-relaxed shadow-sm overflow-y-auto flex-1 text-xs">
+                      {analysisResult.resumo}
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* PAINEL DA DIREITA: Entrada de Instruções de Resposta do Usuário */}
+            {isInstructionsSplitOpen && (
+              <div className="flex flex-col gap-4 bg-white border border-slate-200 rounded-xl p-5 shadow-sm animate-in fade-in slide-in-from-right-4 duration-300 h-[420px]">
+                <h4 className="text-xs font-bold text-gov-blue uppercase tracking-wider border-b border-slate-200 pb-2 flex items-center gap-2">
+                  <FileText size={16} /> 
+                  Diretrizes para Redação da Resposta
+                </h4>
+
+                <div className="flex flex-col gap-2 flex-1">
+                  <label className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">
+                    Instruções Técnicas e Argumentação:
+                  </label>
+                  <textarea
+                    value={responseInstructions}
+                    onChange={(e) => setResponseInstructions(e.target.value)}
+                    placeholder="Ex: Informe que a Prefeitura cumpriu os termos de publicidade contratando a dupla por meio da agência licenciada e que os comprovantes de pagamento e a cópia do edital oficial serão anexados em resposta..."
+                    className="w-full h-[270px] resize-none rounded-lg border border-slate-200 bg-slate-50/50 px-4 py-3 text-sm text-slate-900 transition-all focus:border-gov-blue focus:bg-white focus:ring-1 focus:ring-gov-blue outline-none placeholder:text-slate-400 leading-relaxed"
+                    required
+                  />
+                  <p className="text-[10px] text-slate-400 mt-1">
+                    A IA utilizará essas instruções e os dados analisados do ofício para redigir a resposta no formato timbrado legal.
+                  </p>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Botões do Modal */}
+          <div className="flex justify-end gap-3 pt-4 border-t border-slate-100">
+            <Button
+              variant="outline"
+              onClick={() => {
+                setIsAnalysisModalOpen(false);
+                setIsInstructionsSplitOpen(false);
+              }}
+            >
+              Fechar Análise
+            </Button>
+
+            {!isInstructionsSplitOpen ? (
+              <Button
+                variant="primary"
+                leftIcon={<FileText size={16} />}
+                className="bg-gov-blue hover:bg-gov-blue/90"
+                onClick={() => setIsInstructionsSplitOpen(true)}
+              >
+                Instruções de Resposta
+              </Button>
+            ) : (
+              <Button
+                variant="primary"
+                leftIcon={<Sparkles size={16} />}
+                onClick={handleRequestGeneration}
+                isLoading={isGenerating}
+                disabled={!responseInstructions.trim()}
+              >
+                Gerar Resposta com IA
+              </Button>
+            )}
+          </div>
+        </div>
       </Modal>
 
       {/* Rodapé Físico Fixo em todas as páginas no PDF */}
