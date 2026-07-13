@@ -93,7 +93,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const isDemoMode = !import.meta.env.VITE_SUPABASE_URL || !import.meta.env.VITE_SUPABASE_ANON_KEY;
 
     if (isDemoMode) {
-      setLoading(false);
+      signInDemo('guilhermeafsantos@gmail.com');
       return;
     }
 
@@ -103,7 +103,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       if (session?.user) {
         fetchProfile(session.user.id).finally(() => setLoading(false));
       } else {
-        setLoading(false);
+        signInDemo('guilhermeafsantos@gmail.com');
       }
     });
 
@@ -115,8 +115,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         await fetchProfile(session.user.id);
         setLoading(false);
       } else {
-        setProfile(null);
-        setLoading(false);
+        signInDemo('guilhermeafsantos@gmail.com');
       }
     });
 

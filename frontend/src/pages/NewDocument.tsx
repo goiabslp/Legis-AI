@@ -18,7 +18,6 @@ import {
   MessageSquare,
   Send,
 } from 'lucide-react';
-import { Card } from '../components/ui/Card';
 import { Button } from '../components/ui/Button';
 import { Input } from '../components/ui/Input';
 import { Modal } from '../components/ui/Modal';
@@ -30,28 +29,19 @@ export const NewDocument: React.FC = () => {
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
   const { profile } = useAuth();
-  
+
   const customLogo = localStorage.getItem('mun_logo_base64') || profile?.municipality?.logoUrl;
   const customWatermark = localStorage.getItem('mun_watermark_base64');
 
   // Estados do formulário
   const [title, setTitle] = useState('');
   const [docType, setDocType] = useState(searchParams.get('type') || 'OFICIO');
-  const [promptText, setPromptText] = useState('');
   const [generatedContent, setGeneratedContent] = useState('');
   const [isGenerating, setIsGenerating] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
 
   // Status do documento
   const [documentStatus, setDocumentStatus] = useState('RASCUNHO');
-
-  // Estados de Verificação de Detalhes (Data, Hora, Local, Autoridade)
-  const [isDetailsModalOpen, setIsDetailsModalOpen] = useState(false);
-  const [missingFields, setMissingFields] = useState<string[]>([]);
-  const [detailData, setDetailData] = useState('');
-  const [detailHora, setDetailHora] = useState('');
-  const [detailLocal, setDetailLocal] = useState('');
-  const [detailAutoridade, setDetailAutoridade] = useState('');
 
   // Estado para Anexo de Arquivo
   const [attachedFile, setAttachedFile] = useState<File | null>(null);
@@ -65,13 +55,28 @@ export const NewDocument: React.FC = () => {
   } | null>(null);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
 
-  // Estados para Modal de Análise e Instruções de Resposta
+  // Estados para Modal de Análise
   const [isAnalysisModalOpen, setIsAnalysisModalOpen] = useState(false);
-  const [isInstructionsSplitOpen, setIsInstructionsSplitOpen] = useState(false);
-  const [responseInstructions, setResponseInstructions] = useState('');
   const [analysisError, setAnalysisError] = useState('');
   const [originalGeneratedContent, setOriginalGeneratedContent] = useState('');
   const [appliedInstructions, setAppliedInstructions] = useState<string[]>([]);
+  const [pendingPrompt, setPendingPrompt] = useState<string | null>(null);
+
+  interface LearnedContext {
+    autoridades: string[];
+    cargos: string[];
+    locais: string[];
+    temas: string[];
+    eventos: string[];
+  }
+
+  const [learnedContext, setLearnedContext] = useState<LearnedContext>({
+    autoridades: ['Comandante do 11º Batalhão', 'Prefeito Municipal'],
+    cargos: ['Comandante', 'Prefeito', 'Secretário Municipal'],
+    locais: ['Auditório Municipal', 'Campo Municipal', 'Sede da Prefeitura'],
+    temas: ['Apoio operacional', 'Segurança pública', 'Merenda escolar'],
+    eventos: ['Desfile da Cavalgada', 'Palestra Educacional'],
+  });
 
   // Estados e lógica do Chat de Refinamento com IA
   interface ChatMessage {
@@ -80,15 +85,30 @@ export const NewDocument: React.FC = () => {
     timestamp: string;
   }
 
-  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([
-    {
-      sender: 'ia',
-      text: 'Olá! Sou seu assistente de refinamento. O documento oficial foi gerado ao lado. Se precisar de ajustes (ex: alterar prazos, acrescentar parágrafos, mudar termos ou incluir detalhes), digite aqui e eu aplicarei diretamente no texto.',
-      timestamp: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
-    }
-  ]);
+  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
   const [chatInput, setChatInput] = useState('');
   const [isChatTyping, setIsChatTyping] = useState(false);
+
+  interface ChatFlowState {
+    isActive: boolean;
+    docType: 'convite' | 'geral';
+    step: number;
+    hasMultipleDays?: boolean;
+    data: {
+      tema?: string;
+      dataHora?: string;
+      local?: string;
+      autoridades?: string;
+      atracoes?: string;
+    };
+  }
+
+  const [chatFlow, setChatFlow] = useState<ChatFlowState>({
+    isActive: false,
+    docType: 'geral',
+    step: 0,
+    data: {},
+  });
 
   useEffect(() => {
     // Rola para baixo o contêiner do chat de forma automática e suave
@@ -97,6 +117,27 @@ export const NewDocument: React.FC = () => {
       container.scrollTop = container.scrollHeight;
     }
   }, [chatMessages, isChatTyping]);
+
+  useEffect(() => {
+    const saved = localStorage.getItem('legis_ai_learned_context');
+    if (saved) {
+      try {
+        setLearnedContext(JSON.parse(saved));
+      } catch (e) {
+        console.error('Erro ao ler legis_ai_learned_context:', e);
+      }
+    } else {
+      const defaultCtx: LearnedContext = {
+        autoridades: ['Comandante do 11º Batalhão', 'Prefeito Municipal'],
+        cargos: ['Comandante', 'Prefeito', 'Secretário Municipal'],
+        locais: ['Auditório Municipal', 'Centro Histórico', 'Sede da Prefeitura'],
+        temas: ['Apoio operacional', 'Segurança pública', 'Merenda escolar'],
+        eventos: ['Desfile da Cavalgada', 'Palestra Educacional'],
+      };
+      localStorage.setItem('legis_ai_learned_context', JSON.stringify(defaultCtx));
+      setLearnedContext(defaultCtx);
+    }
+  }, []);
 
   const getInstructionCategory = (instruction: string): 'PRAZO' | 'ASSINATURA' | 'URGENCIA' | 'LEI' | 'DOCUMENTO' | 'CORDIALIDADE' | 'GERAL' => {
     const lower = instruction.toLowerCase();
@@ -112,7 +153,7 @@ export const NewDocument: React.FC = () => {
   const correctGrammarAndOrthography = (text: string): { correctedText: string; corrections: string[] } => {
     let corrected = text;
     const corrections: string[] = [];
-    
+
     const commonErrors = [
       { wrong: /\bpraso\b/gi, right: 'prazo' },
       { wrong: /\bdeiz\b/gi, right: 'dez' },
@@ -141,20 +182,20 @@ export const NewDocument: React.FC = () => {
       { wrong: /\bword\b/g, right: 'Word' },
       { wrong: /\bdoc\b/g, right: 'DOC' },
     ];
-    
+
     commonErrors.forEach(({ wrong, right }) => {
       if (wrong.test(corrected)) {
         corrected = corrected.replace(wrong, right);
         corrections.push(`"${right}"`);
       }
     });
-    
+
     return { correctedText: corrected, corrections };
   };
 
   const reformulateTextWithInstruction = (currentText: string, instruction: string): string => {
     const cleanInstruction = instruction.toLowerCase().trim();
-    
+
     const isCavalgada = currentText.toLowerCase().includes('cavalgada') || currentText.toLowerCase().includes('policiamento') || currentText.toLowerCase().includes('pm');
     const isSaude = currentText.toLowerCase().includes('hospital') || currentText.toLowerCase().includes('medicamento') || currentText.toLowerCase().includes('insumos');
     const isOficioResposta = currentText.toLowerCase().includes('ofício requisitório') || currentText.toLowerCase().includes('resposta ao ofício') || docType === 'RESPOSTA_OFICIO';
@@ -166,7 +207,7 @@ export const NewDocument: React.FC = () => {
       if (dateMatch) {
         const newDate = dateMatch[0];
         let updatedText = currentText.replace(/\d{2}\/\d{2}\/\d{4}/g, newDate)
-                                     .replace(/\d{2}\s+de\s+[a-zA-ZçÇ]+\s+de\s+\d{4}/gi, newDate);
+          .replace(/\d{2}\s+de\s+[a-zA-ZçÇ]+\s+de\s+\d{4}/gi, newDate);
         if (updatedText !== currentText) return updatedText;
       }
     }
@@ -185,12 +226,12 @@ export const NewDocument: React.FC = () => {
     if (cleanInstruction.includes('prazo') || cleanInstruction.includes('dias') || cleanInstruction.includes('tempo')) {
       const daysMatch = cleanInstruction.match(/\d+/);
       const newDays = daysMatch ? daysMatch[0] : '15';
-      
+
       let newText = currentText.replace(/prazos?\s+de\s+\d+\s+dias/gi, `prazo de ${newDays} dias`)
-                               .replace(/prazos?\s+de\s+cinco\s+dias/gi, `prazo de ${newDays} dias`)
-                               .replace(/\d+\s+dias\s+úteis/gi, `${newDays} dias úteis`)
-                               .replace(/5\s+dias/gi, `${newDays} dias`);
-                               
+        .replace(/prazos?\s+de\s+cinco\s+dias/gi, `prazo de ${newDays} dias`)
+        .replace(/\d+\s+dias\s+úteis/gi, `${newDays} dias úteis`)
+        .replace(/5\s+dias/gi, `${newDays} dias`);
+
       if (newText === currentText) {
         if (isOficioResposta) {
           newText = currentText.replace('à inteira disposição para prestar quaisquer esclarecimentos complementares', `à inteira disposição, assinalando-se o prazo improrrogável de ${newDays} dias para o devido cumprimento das obrigações e esclarecimentos complementares`);
@@ -209,15 +250,15 @@ export const NewDocument: React.FC = () => {
       }
       return newText;
     }
-    
+
     // 1.d. Alteração de Assinaturas/Prefeito/Signatário
     if (cleanInstruction.includes('prefeito') || cleanInstruction.includes('nome') || cleanInstruction.includes('assinatura') || cleanInstruction.includes('signatário') || cleanInstruction.includes('cargo')) {
       if (cleanInstruction.includes('secretário') || cleanInstruction.includes('secretaria') || cleanInstruction.includes('interino')) {
         return currentText.replace(/Prefeito Municipal/gi, 'Secretário Municipal de Administração')
-                           .replace(/Carlos Silva/gi, profile?.name || 'Secretário Responsável');
+          .replace(/Carlos Silva/gi, profile?.name || 'Secretário Responsável');
       }
       return currentText.replace(/Prefeito Municipal/gi, 'Prefeito Municipal (Em Exercício)')
-                         .replace(/Carlos Silva/gi, profile?.name || 'Servidor Responsável');
+        .replace(/Carlos Silva/gi, profile?.name || 'Servidor Responsável');
     }
 
     // 2. REMOÇÃO DE TRECHOS (Eliminação inteligente)
@@ -225,7 +266,7 @@ export const NewDocument: React.FC = () => {
       const lines = currentText.split('\n');
       const keywords = ['lei', 'artigo', 'art.', 'cavalgada', 'urgência', 'urgente', 'agradecimento', 'estima', 'parágrafo', 'paragrafo', 'nutrição', 'saúde', 'insumo'];
       const keywordToExclude = keywords.find(kw => cleanInstruction.includes(kw));
-      
+
       if (keywordToExclude) {
         const filteredLines = lines.filter((line, index) => {
           const lowerLine = line.toLowerCase();
@@ -249,16 +290,16 @@ export const NewDocument: React.FC = () => {
       let updatedText = currentText;
       if (cleanInstruction.includes('assertivo') || cleanInstruction.includes('enérgico') || cleanInstruction.includes('cobrança') || cleanInstruction.includes('firme')) {
         updatedText = updatedText.replace(/Prezado\(a\) Senhor\(a\),/gi, 'Excelentíssimo(a) Senhor(a),')
-                                 .replace(/Cumprimentando-o\(a\) cordialmente/gi, 'Em cumprimento às normas vigentes de fiscalização')
-                                 .replace(/solicitamos/gi, 'requisita-se em caráter imperativo')
-                                 .replace(/permanecemos à inteira disposição/gi, 'reiteramos a necessidade de atendimento imediato');
+          .replace(/Cumprimentando-o\(a\) cordialmente/gi, 'Em cumprimento às normas vigentes de fiscalização')
+          .replace(/solicitamos/gi, 'requisita-se em caráter imperativo')
+          .replace(/permanecemos à inteira disposição/gi, 'reiteramos a necessidade de atendimento imediato');
       } else if (cleanInstruction.includes('cordial') || cleanInstruction.includes('amigável') || cleanInstruction.includes('gentil')) {
         updatedText = updatedText.replace(/solicitamos/gi, 'solicitamos gentilmente')
-                                 .replace(/improrrogável/gi, 'solicitado dentro do cronograma administrativo')
-                                 .replace(/sob pena de/gi, 'visando o melhor alinhamento com');
+          .replace(/improrrogável/gi, 'solicitado dentro do cronograma administrativo')
+          .replace(/sob pena de/gi, 'visando o melhor alinhamento com');
       } else if (cleanInstruction.includes('formal') || cleanInstruction.includes('jurídico') || cleanInstruction.includes('polido')) {
         updatedText = updatedText.replace(/Prezado Comandante,/gi, 'Excelentíssimo Senhor Comandante,')
-                                 .replace(/Atenciosamente,/gi, 'Aproveitamos o ensejo para externar nossos protestos de elevada estima e consideração.\n\nRespeitosamente,');
+          .replace(/Atenciosamente,/gi, 'Aproveitamos o ensejo para externar nossos protestos de elevada estima e consideração.\n\nRespeitosamente,');
       }
       return updatedText;
     }
@@ -266,9 +307,9 @@ export const NewDocument: React.FC = () => {
     // 4. ADICIONAR INFORMAÇÃO (Inserção no local mais adequado)
     let baseText = instruction;
     baseText = baseText.replace(/^(adicione|coloque|escreva|fale|diga|peça|solicite|insira)\s+que\s+/i, '')
-                       .replace(/^(adicione|coloque|escreva|fale|diga|peça|solicite|insira)\s+/i, '');
+      .replace(/^(adicione|coloque|escreva|fale|diga|peça|solicite|insira)\s+/i, '');
     baseText = baseText.charAt(0).toUpperCase() + baseText.slice(1);
-    
+
     let formalParagraph = '';
     if (isOficioResposta) {
       formalParagraph = `Insta registrar, sob o prisma das justificativas operacionais demandadas, que a Administração Municipal prioriza o pleno esclarecimento acerca de ${baseText.charAt(0).toLowerCase() + baseText.slice(1)}, de modo a resguardar o interesse público e a celeridade procedimental.`;
@@ -279,7 +320,7 @@ export const NewDocument: React.FC = () => {
     } else {
       formalParagraph = `Cumpre destacar, por oportuno, que as ações em andamento consideram fundamental a diretriz de que ${baseText.charAt(0).toLowerCase() + baseText.slice(1)}, em estrita observância à regularidade e conformidade dos atos.`;
     }
-    
+
     const lines = currentText.split('\n');
     const endIdx = lines.findIndex(l => l.toLowerCase().includes('atenciosamente') || l.includes('______'));
     if (endIdx !== -1) {
@@ -290,25 +331,712 @@ export const NewDocument: React.FC = () => {
     }
   };
 
+  const extractAndSaveEntities = (text: string) => {
+    if (!text) return;
+    const lowerText = text.toLowerCase();
+
+    // Carrega o contexto atual
+    let currentCtx: LearnedContext = {
+      autoridades: [],
+      cargos: [],
+      locais: [],
+      temas: [],
+      eventos: [],
+    };
+
+    const saved = localStorage.getItem('legis_ai_learned_context');
+    if (saved) {
+      try {
+        currentCtx = JSON.parse(saved);
+      } catch (e) {
+        console.error(e);
+      }
+    }
+
+    // 1. Extração de Cargos
+    const knownCargos = ['prefeito', 'secretário', 'secretaria', 'diretor', 'comandante', 'vereador', 'pm', 'policial', 'guarda', 'ministro', 'coordenador', 'delegado'];
+    knownCargos.forEach(cargo => {
+      if (lowerText.includes(cargo)) {
+        const capitalizedCargo = cargo.charAt(0).toUpperCase() + cargo.slice(1);
+        if (!currentCtx.cargos.includes(capitalizedCargo)) {
+          currentCtx.cargos.push(capitalizedCargo);
+        }
+      }
+    });
+
+    // 2. Extração de Autoridades
+    const authRegexes = [
+      /ao\s+(senhor|sr\.|sra\.|senhora)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+){1,3})/g,
+      /comandante\s+do\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+){1,3})/gi,
+      /prefeito\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+){1,3})/gi,
+      /secretário\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+){1,3})/gi
+    ];
+
+    authRegexes.forEach(regex => {
+      let match;
+      while ((match = regex.exec(text)) !== null) {
+        const entity = match[0].trim();
+        if (entity.length > 5 && entity.length < 50) {
+          const formatted = entity.replace(/\s+/g, ' ');
+          if (!currentCtx.autoridades.includes(formatted)) {
+            currentCtx.autoridades.push(formatted);
+          }
+        }
+      }
+    });
+
+    // 3. Extração de Locais
+    const localRegex = /(?:no\s+auditório|na\s+praça|na\s+rua|na\s+avenida|no\s+centro|no\s+clube|na\s+sede|no\s+parque)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+){1,3})/gi;
+    let localMatch;
+    while ((localMatch = localRegex.exec(text)) !== null) {
+      const entity = localMatch[0].trim();
+      if (entity.length > 5 && entity.length < 50) {
+        const formatted = entity.replace(/\s+/g, ' ');
+        if (!currentCtx.locais.includes(formatted)) {
+          currentCtx.locais.push(formatted);
+        }
+      }
+    }
+
+    // 4. Extração de Eventos
+    const eventRegex = /(?:desfile\s+da\s+|palestra\s+de\s+|posse\s+do\s+|cavalgada|inauguração\s+da\s+)([A-Z][a-z]+(?:\s+[A-Z][a-z]+){1,3})/gi;
+    let eventMatch;
+    while ((eventMatch = eventRegex.exec(text)) !== null) {
+      const entity = eventMatch[0].trim();
+      if (entity.length > 5 && entity.length < 50) {
+        const formatted = entity.replace(/\s+/g, ' ');
+        if (!currentCtx.eventos.includes(formatted)) {
+          currentCtx.eventos.push(formatted);
+        }
+      }
+    }
+
+    // Grava de volta no localStorage e no estado
+    localStorage.setItem('legis_ai_learned_context', JSON.stringify(currentCtx));
+    setLearnedContext(currentCtx);
+  };
+
+  const isPromptVague = (text: string) => {
+    const clean = text.toLowerCase().trim();
+    if (clean.length < 25) return true;
+
+    const vaguePhrases = [
+      'gerar um convite', 'gerar convite', 'criar um convite', 'fazer um convite', 'um convite', 'criar convite', 'convite',
+      'gerar um ofício', 'gerar oficio', 'criar um oficio', 'fazer um oficio', 'um oficio', 'criar oficio', 'ofício', 'oficio',
+      'gerar um memorando', 'gerar memorando', 'criar um memorando', 'fazer um memorando', 'um memorando', 'memorando',
+      'gerar um decreto', 'gerar decreto', 'criar um decreto', 'fazer um decreto', 'um decreto', 'decreto'
+    ];
+    if (vaguePhrases.some(p => clean === p || clean === p + '.')) {
+      return true;
+    }
+    return false;
+  };
+
+  const verifyPromptDetails = (text: string) => {
+    const missing: string[] = [];
+    const lowerText = text.toLowerCase();
+
+    // 1. Verifica Data (ex: 10/08/2026, 10-08-2026, dia 10, 10 de agosto)
+    const dateRegex = /(\d{2}[/.-]\d{2}[/.-]\d{4}|\d{2}\s+de\s+[a-zA-Z]+|\bdia\s+\d{1,2}\b)/;
+    if (!dateRegex.test(lowerText)) {
+      missing.push('data');
+    }
+
+    // 2. Verifica Hora (ex: 14:00, 14h00, 14 horas)
+    const timeRegex = /(\d{2}h\d{2}|\d{2}:\d{2}|\b\d{1,2}\s*horas\b)/;
+    if (!timeRegex.test(lowerText)) {
+      missing.push('hora');
+    }
+
+    // 3. Verifica Local (rua, praça, avenida, centro, parque, auditório, sala, sede, ginasio, etc.)
+    const localKeywords = ['rua', 'praça', 'praca', 'avenida', 'centro', 'parque', 'clube', 'escola', 'posto', 'hospital', 'auditório', 'auditorio', 'sede', 'sala', 'ginásio', 'ginasio', 'batalhão', 'batalhao'];
+    const hasLocal = localKeywords.some((word) => lowerText.includes(word));
+    if (!hasLocal) {
+      missing.push('local');
+    }
+
+    // 4. Verifica Autoridade / Participantes (prefeito, secretário, comandante, pm, polícia, guarda, etc.)
+    const authKeywords = ['prefeito', 'secretário', 'secretaria', 'diretor', 'comandante', 'vereador', 'pm', 'polícia', 'policia', 'guarda', 'ministro', 'coordenador', 'chefe', 'governador', 'delegado', 'cavaleiro'];
+    const hasAuth = authKeywords.some((word) => lowerText.includes(word));
+    if (!hasAuth) {
+      missing.push('autoridade');
+    }
+
+    return missing;
+  };
+
   const handleSendChatMessage = (e: React.FormEvent) => {
     e.preventDefault();
     if (!chatInput.trim()) return;
 
     const userText = chatInput.trim();
     const timeStr = new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
-    
-    // Adiciona mensagem do usuário ao histórico visual
+
+    // Adiciona mensagem do usuário ao histórico visual e limpa input
     setChatMessages(prev => [...prev, { sender: 'user', text: userText, timestamp: timeStr }]);
     setChatInput('');
     setIsChatTyping(true);
 
-    // Tratamento primário de erro de gramática, ortografia e escrita informal
+    // 0. Caso estejamos no fluxo guiado por etapas (chatFlow ativo)
+    if (!generatedContent && chatFlow.isActive) {
+      const step = chatFlow.step;
+      const docTypeFlow = chatFlow.docType;
+      
+      const newCtxData = { ...chatFlow.data };
+      const userName = profile?.name?.split(' ')[0] || 'Guilherme';
+      
+      if (docTypeFlow === 'convite') {
+        if (step === 1) {
+          newCtxData.tema = userText;
+          setChatFlow(prev => ({ ...prev, step: 2, data: newCtxData }));
+          
+          setTimeout(() => {
+            setChatMessages(prev => [
+              ...prev,
+              {
+                sender: 'ia',
+                text: `Nossa, ${userName}, que tema sensacional! Já estou até visualizando o documento oficial pronto! 🚀`,
+                timestamp: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
+              },
+              {
+                sender: 'ia',
+                text: `Agora, me conta: qual será a **Data e o Horário** que deverão constar no convite?`,
+                timestamp: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
+              }
+            ]);
+            setIsChatTyping(false);
+          }, 800);
+          return;
+        } else if (step === 2) {
+          newCtxData.dataHora = userText;
+          
+          // Detecta múltiplos dias
+          const lowerText = userText.toLowerCase();
+          const isMulti = lowerText.includes('dias') || lowerText.includes(' e ') || lowerText.includes(' a ') || lowerText.includes('até') || lowerText.includes('ate');
+          
+          setChatFlow(prev => ({ ...prev, step: 3, hasMultipleDays: isMulti, data: newCtxData }));
+          
+          setTimeout(() => {
+            setChatMessages(prev => [
+              ...prev,
+              {
+                sender: 'ia',
+                text: isMulti 
+                  ? `Anotado, ${userName}! Vi que serão vários dias de celebração, que chique! 🥳`
+                  : `Anotado, ${userName}! Tudo pronto para esse grande dia. 📅`,
+                timestamp: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
+              },
+              {
+                sender: 'ia',
+                text: isMulti
+                  ? `Quais serão as **atrações e atividades planejadas por dia** do evento? (Ex: Dia 1: Show X, Dia 2: Gincana Y)`
+                  : `Quais serão as **atrações e atividades** planejadas para o evento? (Ex: Palestra do Diretor, Coffee Break)`,
+                timestamp: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
+              }
+            ]);
+            setIsChatTyping(false);
+          }, 800);
+          return;
+        } else if (step === 3) {
+          newCtxData.atracoes = userText;
+          setChatFlow(prev => ({ ...prev, step: 4, data: newCtxData }));
+          
+          const sugLocais = learnedContext.locais.slice(-2).join(', ');
+          setTimeout(() => {
+            setChatMessages(prev => [
+              ...prev,
+              {
+                sender: 'ia',
+                text: `Show de bola, ${userName}! As atrações vão deixar o evento inesquecível! 🎤🎸`,
+                timestamp: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
+              },
+              {
+                sender: 'ia',
+                text: `E onde será realizada essa grande festa? Me diz o **Local**.\n\n💡 *Sugestões salvas anteriormente:*\n• ${sugLocais || 'Nenhum local gravado ainda'}`,
+                timestamp: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
+              }
+            ]);
+            setIsChatTyping(false);
+          }, 800);
+          return;
+        } else if (step === 4) {
+          newCtxData.local = userText;
+          setChatFlow(prev => ({ ...prev, step: 5, data: newCtxData }));
+          
+          const sugAutoridades = learnedContext.autoridades.slice(-2).join(', ');
+          setTimeout(() => {
+            setChatMessages(prev => [
+              ...prev,
+              {
+                sender: 'ia',
+                text: `Maravilha, ${userName}! Local super bacana. 📍`,
+                timestamp: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
+              },
+              {
+                sender: 'ia',
+                text: `Para encerrarmos nossa conversa antes de eu gerar o texto oficial: quais **Autoridades ou Convidados de honra** estarão presentes e para quem o convite deve ser **Direcionado**?\n\n💡 *Sugestões salvas anteriormente:*\n• ${sugAutoridades || 'Nenhuma autoridade gravada'}`,
+                timestamp: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
+              }
+            ]);
+            setIsChatTyping(false);
+          }, 800);
+          return;
+        } else if (step === 5) {
+          newCtxData.autoridades = userText;
+          setChatFlow({ isActive: false, docType: 'geral', step: 0, data: {} });
+          
+          const finalPrompt = `Gerar um convite oficial para o evento de tema "${newCtxData.tema}". O evento ocorrerá no dia e horário "${newCtxData.dataHora}", tendo como local o "${newCtxData.local}". As atrações e atividades planejadas são: "${newCtxData.atracoes}". As autoridades presentes ou convidados de honra são: "${userText}".`;
+          
+          setIsGenerating(true);
+          
+          const startGeneration = async () => {
+            try {
+              const { data } = await api.post('/documents/generate-ia', {
+                type: docType,
+                prompt: finalPrompt,
+                municipalityName: profile?.municipality?.name,
+                secretariatName: profile?.secretariat?.name,
+              });
+              setGeneratedContent(data.content);
+              setOriginalGeneratedContent(data.content);
+              extractAndSaveEntities(data.content);
+              setAppliedInstructions([]);
+              
+              setChatMessages(prev => [...prev, {
+                sender: 'ia',
+                text: `✨ Sensacional, ${userName}! Documento prontinho saindo do forno com muito carinho para você. Revise o texto e solicite refinamentos se necessário!`,
+                timestamp: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
+              }]);
+            } catch (err) {
+              console.error(err);
+              const year = new Date().getFullYear();
+              const typeLabel = docType === 'OFICIO' ? 'OFÍCIO CIRCULAR' : docType === 'MEMORANDO' ? 'MEMORANDO INTERNO' : docType === 'RESPOSTA_OFICIO' ? 'RESPOSTA A OFÍCIO' : 'DECRETO MUNICIPAL';
+              const munNameNormalized = profile?.municipality?.name || 'Nova Friburgo';
+              const secNameNormalized = profile?.secretariat?.name || 'Secretaria Municipal de Administração';
+              
+              const bodyText = `Ao Senhor Comandante do 11º Batalhão de Polícia Militar\n\nAssunto: Convite solene e formal para comparecimento ao evento de ${newCtxData.tema}.\n\nPrezado Senhor,\n\nCumprimentando-o cordialmente e no uso das atribuições que regem as rotinas administrativas do Município de ${munNameNormalized}, temos a honra de convidar Vossa Senhoria para participar solenemente do evento de ${newCtxData.tema}, que realizar-se-á ${newCtxData.dataHora}, tendo como local o ${newCtxData.local}.\n\nO evento contará com uma programação especial repleta de atrações importantes: ${newCtxData.atracoes}.\n\nContamos com a prestigiosa presença de Vossa Senhoria e das demais autoridades: ${userText}, sendo vossa participação indispensável para abrilhantar esta solenidade e consolidar a integração institucional de nossa comarca.\n\nRenovamos na oportunidade os protestos de nossa elevada estima e consideração.\n\nAtenciosamente,`;
+              
+              const fallbackText = `MUNICÍPIO DE ${munNameNormalized.toUpperCase()}\nSECRETARIA MUNICIPAL DE ${secNameNormalized.toUpperCase()}\n\n${typeLabel} Nº 124/${year}\n\n${bodyText}\n\n\n\n\n__________________________________\n${profile?.name || 'Servidor Responsável'}\n${secNameNormalized}`;
+              
+              setGeneratedContent(fallbackText);
+              setOriginalGeneratedContent(fallbackText);
+              extractAndSaveEntities(fallbackText);
+              setAppliedInstructions([]);
+              
+              setChatMessages(prev => [...prev, {
+                sender: 'ia',
+                text: `✨ Sensacional, ${userName}! Elaborei o Convite oficial ao lado com base nas informações coletadas. Revise o texto e me informe qualquer modificação que precise!`,
+                timestamp: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
+              }]);
+            } finally {
+              setIsGenerating(false);
+              setIsChatTyping(false);
+            }
+          };
+          
+          startGeneration();
+          return;
+        }
+      } else {
+        if (step === 1) {
+          newCtxData.tema = userText;
+          setChatFlow(prev => ({ ...prev, step: 2, data: newCtxData }));
+          
+          const sugAutoridades = learnedContext.autoridades.slice(-2).join(', ');
+          setTimeout(() => {
+            setChatMessages(prev => [
+              ...prev,
+              {
+                sender: 'ia',
+                text: `👍 Entendido! O assunto principal será: **"${userText}"**.`,
+                timestamp: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
+              },
+              {
+                sender: 'ia',
+                text: `Agora, para quem o documento deve ser **Direcionado**? (Por favor, informe a autoridade, cargo ou setor de destino).\n\n💡 *Sugestões salvas:*\n• ${sugAutoridades || 'Nenhuma autoridade gravada'}`,
+                timestamp: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
+              }
+            ]);
+            setIsChatTyping(false);
+          }, 800);
+          return;
+        } else if (step === 2) {
+          newCtxData.autoridades = userText;
+          setChatFlow(prev => ({ ...prev, step: 3, data: newCtxData }));
+          
+          setTimeout(() => {
+            setChatMessages(prev => [
+              ...prev,
+              {
+                sender: 'ia',
+                text: `👤 Certo, destinatário definido como: **"${userText}"**.`,
+                timestamp: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
+              },
+              {
+                sender: 'ia',
+                text: `Há algum **Prazo de resposta** ou detalhe de **Data e Local** adicional que deseja que conste no corpo do documento?`,
+                timestamp: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
+              }
+            ]);
+            setIsChatTyping(false);
+          }, 800);
+          return;
+        } else if (step === 3) {
+          newCtxData.dataHora = userText;
+          setChatFlow({ isActive: false, docType: 'geral', step: 0, data: {} });
+          
+          const finalPrompt = `Gerar um ${docType === 'OFICIO' ? 'ofício' : docType === 'MEMORANDO' ? 'memorando' : docType === 'DECRETO' ? 'decreto' : 'documento'} oficial com o objetivo: "${newCtxData.tema}". Destinatário: "${newCtxData.autoridades}". Prazos e detalhes adicionais: "${userText}".`;
+          
+          setIsGenerating(true);
+          
+          const startGeneration = async () => {
+            try {
+              const { data } = await api.post('/documents/generate-ia', {
+                type: docType,
+                prompt: finalPrompt,
+                municipalityName: profile?.municipality?.name,
+                secretariatName: profile?.secretariat?.name,
+              });
+              setGeneratedContent(data.content);
+              setOriginalGeneratedContent(data.content);
+              extractAndSaveEntities(data.content);
+              setAppliedInstructions([]);
+              
+              setChatMessages(prev => [...prev, {
+                sender: 'ia',
+                text: '✨ Prontinho! Reuni os dados informados por você e elaborei o documento oficial ao lado. Revise o conteúdo!',
+                timestamp: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
+              }]);
+            } catch (err) {
+              console.error(err);
+              const year = new Date().getFullYear();
+              const typeLabel = docType === 'OFICIO' ? 'OFÍCIO CIRCULAR' : docType === 'MEMORANDO' ? 'MEMORANDO INTERNO' : docType === 'RESPOSTA_OFICIO' ? 'RESPOSTA A OFÍCIO' : 'DECRETO MUNICIPAL';
+              const munNameNormalized = profile?.municipality?.name || 'Nova Friburgo';
+              const secNameNormalized = profile?.secretariat?.name || 'Secretaria Municipal de Administração';
+              
+              const bodyText = `Ao Senhor ${newCtxData.autoridades}\n\nAssunto: Manifestação administrativa quanto à finalidade de ${newCtxData.tema}.\n\nPrezado Senhor,\n\nCumprimentando-o cordialmente, dirigimo-nos a Vossa Senhoria para formalizar as tratativas técnicas relativas a ${newCtxData.tema}.\n\nEm atenção ao pleito e conforme as diretrizes regulatórias vigentes, manifestamos nosso pleno apoio ao andamento da demanda. Ressalta-se que o prazo estimado de acompanhamento dos procedimentos é de ${userText}, devendo as secretarias integradas cooperar conjuntamente para o alcance dos objetivos propostos.\n\nPermanecemos à inteira disposição para demais orientações.\n\nAtenciosamente,`;
+              
+              const fallbackText = `MUNICÍPIO DE ${munNameNormalized.toUpperCase()}\nSECRETARIA MUNICIPAL DE ${secNameNormalized.toUpperCase()}\n\n${typeLabel} Nº 124/${year}\n\n${bodyText}\n\n\n\n\n__________________________________\n${profile?.name || 'Servidor Responsável'}\n${secNameNormalized}`;
+              
+              setGeneratedContent(fallbackText);
+              setOriginalGeneratedContent(fallbackText);
+              extractAndSaveEntities(fallbackText);
+              setAppliedInstructions([]);
+              
+              setChatMessages(prev => [...prev, {
+                sender: 'ia',
+                text: '✨ Prontinho! Elaborei o documento oficial ao lado com base nas informações coletadas. Revise o texto e me informe qualquer modificação que precise!',
+                timestamp: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
+              }]);
+            } finally {
+              setIsGenerating(false);
+              setIsChatTyping(false);
+            }
+          };
+          
+          startGeneration();
+          return;
+        }
+      }
+    }
+
+    // 1. Caso haja geração inicial pendente de informações
+    if (!generatedContent && pendingPrompt) {
+      const lowerInput = userText.toLowerCase();
+      const skipKeywords = ['prosseguir', 'gerar assim mesmo', 'gerar sem preencher', 'pode gerar', 'gerar', 'pular'];
+      const shouldSkip = skipKeywords.some(keyword => lowerInput.includes(keyword));
+
+      let finalPromptToGenerate = pendingPrompt;
+      if (!shouldSkip) {
+        finalPromptToGenerate += `\n\nDetalhes adicionais fornecidos pelo usuário:\n${userText}`;
+      }
+
+      setPendingPrompt(null);
+
+      setIsGenerating(true);
+
+      const startGeneration = async () => {
+        let finalPrompt = finalPromptToGenerate;
+        if (attachedFile) {
+          finalPrompt += `\n\n[Documento em anexo: ${attachedFile.name}]`;
+        }
+
+        try {
+          const { data } = await api.post('/documents/generate-ia', {
+            type: docType,
+            prompt: finalPrompt,
+            municipalityName: docType === 'RESPOSTA_OFICIO' ? 'São José do Goiabal' : profile?.municipality?.name,
+            secretariatName: profile?.secretariat?.name,
+          });
+          setGeneratedContent(data.content);
+          setOriginalGeneratedContent(data.content);
+          extractAndSaveEntities(data.content);
+          setAppliedInstructions([]);
+
+          setChatMessages(prev => [...prev, {
+            sender: 'ia',
+            text: '✨ Prontinho! Elaborei a primeira versão do documento oficial ao lado com base em todos os detalhes. Revise o texto e, se precisar de qualquer alteração, remoção ou ajuste de tom, basta me pedir aqui no chat!',
+            timestamp: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
+          }]);
+        } catch (err) {
+          console.error('Erro na API de geração, rodando fallback simulado:', err);
+
+          const year = new Date().getFullYear();
+          const typeLabel =
+            docType === 'OFICIO'
+              ? 'OFÍCIO CIRCULAR'
+              : docType === 'MEMORANDO'
+                ? 'MEMORANDO INTERNO'
+                : docType === 'RESPOSTA_OFICIO'
+                  ? 'RESPOSTA A OFÍCIO'
+                  : 'DECRETO MUNICIPAL';
+          const munNameNormalized = docType === 'RESPOSTA_OFICIO' ? 'São José do Goiabal' : (profile?.municipality?.name || 'Nova Friburgo');
+          const secNameNormalized = profile?.secretariat?.name || 'Secretaria Municipal de Administração';
+
+          let bodyText = '';
+          const cleanPrompt = finalPromptToGenerate.toLowerCase();
+          const hasAttachment = !!attachedFile;
+          const attachedFileName = attachedFile ? attachedFile.name : '';
+
+          // Tenta extrair detalhes preenchidos na resposta do usuário
+          const dateMatch = userText.match(/(\d{2}[/.-]\d{2}[/.-]\d{4}|\d{2}\s+de\s+[a-zA-Z]+|\bdia\s+\d{1,2}\b)/i);
+          const timeMatch = userText.match(/(\d{2}h\d{2}|\d{2}:\d{2}|\b\d{1,2}\s*horas\b)/i);
+
+          const dataText = dateMatch ? `no dia ${dateMatch[0]}` : 'na data acordada para o evento';
+          const horaText = timeMatch ? `às ${timeMatch[0]}` : 'no horário estipulado';
+
+          if (docType === 'RESPOSTA_OFICIO' && analysisResult) {
+            const formattedResponse = rephraseInstruction(finalPromptToGenerate + (shouldSkip ? '' : `\nDetalhes: ${userText}`), analysisResult.tema);
+            bodyText = `Ao(À) Excelentíssimo(a) Senhor(a) ${analysisResult.autoridade}\n${analysisResult.orgao}\n\nAssunto: Resposta ao Ofício Requisitório - Tema: ${analysisResult.tema}.\n\nPrezado(a) Senhor(a),\n\nCumprimentando-o(a) cordialmente e no uso das atribuições que regem as rotinas deste órgão administrativo do Município de ${munNameNormalized}, dirigimo-nos a Vossa Senhoria em resposta ao expediente encaminhado, cuja análise técnica foi formalmente realizada com base no documento anexo "${attachedFileName}".\n\nEm atenção aos pontos solicitados e em observância às diretrizes da administração pública, apresentamos as manifestações e informações requeridas:\n\n${formattedResponse}\n\nDiante do exposto e pautados nos princípios da eficiência e publicidade administrativa (Art. 37 da Constituição Federal), permanecemos à inteira disposição para prestar quaisquer esclarecimentos complementares que se façam necessários.\n\nAtenciosamente,`;
+          } else if (cleanPrompt.includes('cavalgada') || cleanPrompt.includes('pm') || cleanPrompt.includes('policia') || cleanPrompt.includes('segurança')) {
+            const pmIntro = hasAttachment ? `Com base na análise do cronograma e plano operacional contidos no documento anexo "${attachedFileName}"` : 'Cumprimentando-o cordialmente';
+            bodyText = `Ao Senhor Comandante do 11º Batalhão de Polícia Militar\n\nAssunto: Solicitação de apoio operacional e policiamento preventivo - Desfile da Cavalgada.\n\nPrezado Comandante,\n\n${pmIntro}, dirigimo-nos a Vossa Senhoria para solicitar o valioso e imprescindível apoio da Polícia Militar no policiamento ostensivo e na escolta de trânsito durante a realização do tradicional Desfile da Cavalgada do Município de ${munNameNormalized}.\n\nTal solicitação encontra amparo legal no Art. 144 da Constituição Federal de 1988, o qual estabelece a segurança pública como dever do Estado e direito de todos, exercida para a preservação da ordem pública e da incolumidade das pessoas e do patrimônio. O evento está programado para ocorrer ${dataText}, ${horaText}, partindo da área de concentração indicada em direção ao Centro Histórico, sendo a cooperação com a corporação indispensável para zelar pela segurança pública de nossa comunidade.\n\nAgradecemos imensamente desde já a vossa costumeira cooperação e nos colocamos à disposição para a realização de reuniões de planejamento integrado.\n\nAtenciosamente,`;
+          } else if (cleanPrompt.includes('escola') || cleanPrompt.includes('merenda') || cleanPrompt.includes('educação')) {
+            const eduIntro = hasAttachment ? `Após análise detida do relatório de insumos e especificações técnicas dispostas no documento anexo "${attachedFileName}"` : 'Entramos em contato para formalizar a necessidade de alinhamento';
+            bodyText = `Ao Departamento de Nutrição e Abastecimento Escolar - Secretaria de Educação\n\nAssunto: Planejamento e distribuição de insumos alimentícios - Merenda Escolar.\n\nPrezados,\n\n${eduIntro}, dirigimo-nos a esta diretoria para tratar da otimização do cronograma de distribuição dos alimentos destinados à merenda escolar para as escolas municipais de ${munNameNormalized}.\n\nEsta demanda fundamenta-se nas diretrizes da Lei Federal nº 11.947/2009 (Programa Nacional de Alimentação Escolar - PNAE), que regulamenta a garantia de uma alimentação saudável, adequada e segura para todos os alunos da educação básica pública. Solicitamos que as entregas do próximo trimestre priorizem itens frescos originários da agricultura familiar local, em conformidade com o percentual legal obrigatório de compras públicas sustentáveis.\n\nCertos de vossa presteza no atendimento a esta importante causa educacional, colocamo-nos à disposição para esclarecimentos.\n\nAtenciosamente,`;
+          } else {
+            const geralIntro = hasAttachment ? `Após exame pormenorizado das especificações técnicas anexadas no documento anexo "${attachedFileName}"` : 'Dirigimo-nos a Vossa Senhoria para tratar de assunto relevante para as rotinas deste órgão';
+            bodyText = `Ao(À) Senhor(a) Diretor(a) Responsável do Departamento Competente\n\nAssunto: Encaminhamento de diretrizes operacionais em observância às instruções da secretaria.\n\nPrezado(a) Senhor(a),\n\n${geralIntro}, apresentamos formalmente as manifestações técnicas quanto à seguinte demanda: "${userText}".\n\nA referida solicitação pauta-se no princípio da eficiência e da legalidade que rege a Administração Pública, conforme preconiza o Art. 37, caput, da Constituição Federal. Solicitamos a adoção das providências administrativas necessárias para instrução do processo e posterior manifestação no menor prazo possível.\n\nAgradecemos vossa costumeira colaboração e colocamo-nos à disposição para apoiar as equipes técnicas envolvidas.\n\nAtenciosamente,`;
+          }
+
+          const fallbackText = `MUNICÍPIO DE ${munNameNormalized.toUpperCase()}\nSECRETARIA MUNICIPAL DE ${secNameNormalized.toUpperCase()}\n\n${typeLabel} Nº 124/${year}\n\n${bodyText}\n\n\n\n\n__________________________________\n${profile?.name || 'Servidor Responsável'}\n${secNameNormalized}`;
+
+          setGeneratedContent(fallbackText);
+          setOriginalGeneratedContent(fallbackText);
+          extractAndSaveEntities(fallbackText);
+          setAppliedInstructions([]);
+
+          setChatMessages(prev => [...prev, {
+            sender: 'ia',
+            text: '✨ Prontinho! Elaborei a primeira versão do documento oficial ao lado com base em todos os detalhes. Revise o texto e, se precisar de qualquer alteração, remoção ou ajuste de tom, basta me pedir aqui no chat!',
+            timestamp: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
+          }]);
+        } finally {
+          setIsGenerating(false);
+          setIsChatTyping(false);
+        }
+      };
+
+      startGeneration();
+      return;
+    }
+
+    // 2. Geração Inicial (Primeira mensagem, sem documento gerado ainda)
+    if (!generatedContent) {
+      if (docType === 'RESPOSTA_OFICIO') {
+        if (!attachedFile) {
+          setTimeout(() => {
+            setChatMessages(prev => [...prev, {
+              sender: 'ia',
+              text: '⚠️ Para gerar uma Resposta ao Ofício, é obrigatório anexar o arquivo do Ofício recebido no campo de anexo compacto acima.',
+              timestamp: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
+            }]);
+            setIsChatTyping(false);
+          }, 1000);
+          return;
+        }
+        if (!analysisResult) {
+          setTimeout(() => {
+            setChatMessages(prev => [...prev, {
+              sender: 'ia',
+              text: '⚠️ Ofício não analisado: Por favor, clique no botão "Analisar Ofício por IA" acima para extrairmos os dados de autoria e tema antes de gerarmos a resposta.',
+              timestamp: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
+            }]);
+            setIsChatTyping(false);
+          }, 1000);
+          return;
+        }
+      }
+
+      // A. Verifica se o prompt inicial é muito vago ou impreciso e inicia fluxo por etapas individualizadas
+      if (isPromptVague(userText)) {
+        const isConvite = userText.toLowerCase().includes('convite');
+        const flowType = isConvite ? 'convite' : 'geral';
+        
+        setChatFlow({
+          isActive: true,
+          docType: flowType,
+          step: 1,
+          data: {}
+        });
+
+        setTimeout(() => {
+          if (flowType === 'convite') {
+            const sugEventos = learnedContext.eventos.slice(-2).join(', ');
+            setChatMessages(prev => [
+              ...prev,
+              {
+                sender: 'ia',
+                text: '📝 Entendido! Vou te ajudar a elaborar esse Convite oficial de forma organizada passo a passo.',
+                timestamp: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
+              },
+              {
+                sender: 'ia',
+                text: `Para começar, por favor me informe:\nQual é o Tema ou Assunto principal do evento?\n(Ex: Desfile da Cavalgada, Palestra de Educação)\n\n💡 Sugestões aprendidas em trabalhos anteriores:\n• ${sugEventos || 'Nenhum tema gravado'}`,
+                timestamp: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
+              }
+            ]);
+          } else {
+            const sugTemas = learnedContext.temas.slice(-2).join(', ');
+            setChatMessages(prev => [
+              ...prev,
+              {
+                sender: 'ia',
+                text: '📝 Entendido! Vou te ajudar a elaborar a redação oficial de forma organizada passo a passo.',
+                timestamp: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
+              },
+              {
+                sender: 'ia',
+                text: `Para começarmos, me informe:\nQual é a Finalidade ou Objetivo principal do documento?\n(Ex: Solicitação de apoio preventivo, Planejamento de merenda)\n\n💡 Sugestões aprendidas em trabalhos anteriores:\n• ${sugTemas || 'Nenhum assunto gravado'}`,
+                timestamp: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
+              }
+            ]);
+          }
+          setIsChatTyping(false);
+        }, 800);
+        return;
+      }
+
+      // B. Validação complementar de itens obrigatórios
+      const missing = verifyPromptDetails(userText);
+      if (missing.length > 0) {
+        setPendingPrompt(userText);
+
+        setTimeout(() => {
+          const listFields = missing.map(f => {
+            if (f === 'data') return '📅 Data do Evento/Fato';
+            if (f === 'hora') return '⏰ Horário';
+            if (f === 'local') return '📍 Local de Ocorrência';
+            return '👤 Autoridade / Destinatário Participante';
+          }).join('\n');
+
+          const sugAutoridades = learnedContext.autoridades.slice(-2).join(', ');
+          const sugLocais = learnedContext.locais.slice(-2).join(', ');
+          const sugCargos = learnedContext.cargos.slice(-2).join(', ');
+
+          const suggestionBlock = `\n\n💡 **Sugestões gravadas pela IA (digite-os para preencher):**\n` +
+            `• **Autoridades**: ${sugAutoridades || 'Nenhuma gravada'}\n` +
+            `• **Locais**: ${sugLocais || 'Nenhum gravado'}\n` +
+            `• **Cargos**: ${sugCargos || 'Nenhum gravado'}\n\n` +
+            `*(Se preferir gerar o texto sem preencher, basta digitar **"prosseguir"**!)*`;
+
+          setChatMessages(prev => [...prev, {
+            sender: 'ia',
+            text: `📝 Recebi suas instruções para gerar o documento! Contudo, para que a redação oficial fique completa e precisa, notei que faltam os seguintes dados importantes:\n\n${listFields}${suggestionBlock}`,
+            timestamp: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
+          }]);
+          setIsChatTyping(false);
+        }, 1000);
+        return;
+      }
+
+      setIsGenerating(true);
+
+      const startGeneration = async () => {
+        let finalPrompt = userText;
+        if (attachedFile) {
+          finalPrompt += `\n\n[Documento em anexo: ${attachedFile.name}]`;
+        }
+
+        try {
+          const { data } = await api.post('/documents/generate-ia', {
+            type: docType,
+            prompt: finalPrompt,
+            municipalityName: docType === 'RESPOSTA_OFICIO' ? 'São José do Goiabal' : profile?.municipality?.name,
+            secretariatName: profile?.secretariat?.name,
+          });
+          setGeneratedContent(data.content);
+          setOriginalGeneratedContent(data.content);
+          extractAndSaveEntities(data.content);
+          setAppliedInstructions([]);
+
+          setChatMessages(prev => [...prev, {
+            sender: 'ia',
+            text: '✨ Prontinho! Elaborei a primeira versão do documento oficial ao lado com base nas suas instruções. Revise o texto e, se precisar de qualquer alteração, remoção ou ajuste de tom, basta me pedir aqui no chat!',
+            timestamp: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
+          }]);
+        } catch (err) {
+          console.error('Erro na API de geração, rodando fallback simulado:', err);
+
+          const year = new Date().getFullYear();
+          const typeLabel =
+            docType === 'OFICIO'
+              ? 'OFÍCIO CIRCULAR'
+              : docType === 'MEMORANDO'
+                ? 'MEMORANDO INTERNO'
+                : docType === 'RESPOSTA_OFICIO'
+                  ? 'RESPOSTA A OFÍCIO'
+                  : 'DECRETO MUNICIPAL';
+          const munNameNormalized = docType === 'RESPOSTA_OFICIO' ? 'São José do Goiabal' : (profile?.municipality?.name || 'Nova Friburgo');
+          const secNameNormalized = profile?.secretariat?.name || 'Secretaria Municipal de Administração';
+
+          let bodyText = '';
+          const cleanPrompt = userText.toLowerCase();
+          const hasAttachment = !!attachedFile;
+          const attachedFileName = attachedFile ? attachedFile.name : '';
+
+          if (docType === 'RESPOSTA_OFICIO' && analysisResult) {
+            const formattedResponse = rephraseInstruction(userText, analysisResult.tema);
+            bodyText = `Ao(À) Excelentíssimo(a) Senhor(a) ${analysisResult.autoridade}\n${analysisResult.orgao}\n\nAssunto: Resposta ao Ofício Requisitório - Tema: ${analysisResult.tema}.\n\nPrezado(a) Senhor(a),\n\nCumprimentando-o(a) cordialmente e no uso das atribuições que regem as rotinas deste órgão administrativo do Município de ${munNameNormalized}, dirigimo-nos a Vossa Senhoria em resposta ao expediente encaminhado, cuja análise técnica foi formalmente realizada com base no documento anexo "${attachedFileName}".\n\nEm atenção aos pontos solicitados e em observância às diretrizes da administração pública, apresentamos as manifestações e informações requeridas:\n\n${formattedResponse}\n\nDiante do exposto e pautados nos princípios da eficiência e publicidade administrativa (Art. 37 da Constituição Federal), permanecemos à inteira disposição para prestar quaisquer esclarecimentos complementares que se façam necessários.\n\nAtenciosamente,`;
+          } else if (cleanPrompt.includes('cavalgada') || cleanPrompt.includes('pm') || cleanPrompt.includes('policia') || cleanPrompt.includes('segurança')) {
+            const pmIntro = hasAttachment ? `Com base na análise do cronograma e plano operacional contidos no documento anexo "${attachedFileName}"` : 'Cumprimentando-o cordialmente';
+            bodyText = `Ao Senhor Comandante do 11º Batalhão de Polícia Militar\n\nAssunto: Solicitação de apoio operacional e policiamento preventivo - Desfile da Cavalgada.\n\nPrezado Comandante,\n\n${pmIntro}, dirigimo-nos a Vossa Senhoria para solicitar o valioso e imprescindível apoio da Polícia Militar no policiamento ostensivo e na escolta de trânsito durante a realização do tradicional Desfile da Cavalgada do Município de ${munNameNormalized}.\n\nTal solicitação encontra amparo legal no Art. 144 da Constituição Federal de 1988, o qual estabelece a segurança pública como dever do Estado e direito de todos, exercida para a preservação da ordem pública e da incolumidade das pessoas e do patrimônio. O evento está programado para ocorrer na data acordada para o referido evento, no horário estipulado, partindo da área de concentração indicada em direção ao Centro Histórico, sendo a cooperação com a corporação indispensável para zelar pela segurança pública de nossa comunidade.\n\nAgradecemos imensamente desde já a vossa costumeira cooperação e nos colocamos à disposição para a realização de reuniões de planejamento integrado.\n\nAtenciosamente,`;
+          } else if (cleanPrompt.includes('escola') || cleanPrompt.includes('merenda') || cleanPrompt.includes('educação')) {
+            const eduIntro = hasAttachment ? `Após análise detida do relatório de insumos e especificações técnicas dispostas no documento anexo "${attachedFileName}"` : 'Entramos em contato para formalizar a necessidade de alinhamento';
+            bodyText = `Ao Departamento de Nutrição e Abastecimento Escolar - Secretaria de Educação\n\nAssunto: Planejamento e distribuição de insumos alimentícios - Merenda Escolar.\n\nPrezados,\n\n${eduIntro}, dirigimo-nos a esta diretoria para tratar da otimização do cronograma de distribuição dos alimentos destinados à merenda escolar para as escolas municipais de ${munNameNormalized}.\n\nEsta demanda fundamenta-se nas diretrizes da Lei Federal nº 11.947/2009 (Programa Nacional de Alimentação Escolar - PNAE), que regulamenta a garantia de uma alimentação saudável, adequada e segura para todos os alunos da educação básica pública. Solicitamos que as entregas do próximo trimestre priorizem itens frescos originários da agricultura familiar local, em conformidade com o percentual legal obrigatório de compras públicas sustentáveis.\n\nCertos de vossa presteza no atendimento a esta importante causa educacional, colocamo-nos à disposição para esclarecimentos.\n\nAtenciosamente,`;
+          } else {
+            const geralIntro = hasAttachment ? `Após exame pormenorizado das especificações técnicas anexadas no documento anexo "${attachedFileName}"` : 'Dirigimo-nos a Vossa Senhoria para tratar de assunto relevante para as rotinas deste órgão';
+            bodyText = `Ao(À) Senhor(a) Diretor(a) Responsável do Departamento Competente\n\nAssunto: Encaminhamento de diretrizes operacionais em observância às instruções da secretaria.\n\nPrezado(a) Senhor(a),\n\n${geralIntro}, apresentamos formalmente as manifestações técnicas quanto à seguinte demanda: "${userText}".\n\nA referida solicitação pauta-se no princípio da eficiência e da legalidade que rege a Administração Pública, conforme preconiza o Art. 37, caput, da Constituição Federal. Solicitamos a adoção das providências administrativas necessárias para instrução do processo e posterior manifestação no menor prazo possível.\n\nAgradecemos vossa costumeira colaboração e colocamo-nos à disposição para apoiar as equipes técnicas envolvidas.\n\nAtenciosamente,`;
+          }
+
+          const fallbackText = `MUNICÍPIO DE ${munNameNormalized.toUpperCase()}\nSECRETARIA MUNICIPAL DE ${secNameNormalized.toUpperCase()}\n\n${typeLabel} Nº 124/${year}\n\n${bodyText}\n\n\n\n\n__________________________________\n${profile?.name || 'Servidor Responsável'}\n${secNameNormalized}`;
+
+          setGeneratedContent(fallbackText);
+          setOriginalGeneratedContent(fallbackText);
+          extractAndSaveEntities(fallbackText);
+          setAppliedInstructions([]);
+
+          setChatMessages(prev => [...prev, {
+            sender: 'ia',
+            text: '✨ Prontinho! Elaborei a primeira versão do documento oficial ao lado com base nas suas instruções. Revise o texto e, se precisar de qualquer alteração, remoção ou ajuste de tom, basta me pedir aqui no chat!',
+            timestamp: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
+          }]);
+        } finally {
+          setIsGenerating(false);
+          setIsChatTyping(false);
+        }
+      };
+
+      startGeneration();
+      return;
+    }
+
+    // 3. Caso Geral: Refinamento cumulativo Canvas (Já existe documento gerado)
     const { correctedText, corrections } = correctGrammarAndOrthography(userText);
 
-    // Simula inteligência artificial aplicando a alteração no documento
     setTimeout(() => {
       let responseText = 'Entendido! Reelaborei o texto do documento oficial ao lado integrando formalmente a sua instrução.';
-      
+
       if (corrections.length > 0) {
         responseText = `Análise de ortografia concluída: identifiquei e tratei pequenos desvios gramaticais em sua instrução (ex: corrigido ${corrections.join(', ')}). Com a diretriz ajustada, reescrevi o documento oficial garantindo a coerência e integridade do texto.`;
       } else {
@@ -332,20 +1060,19 @@ export const NewDocument: React.FC = () => {
 
       setAppliedInstructions(prevInstructions => {
         const category = getInstructionCategory(correctedText);
-        
-        // Se a nova categoria de instrução for diferente de GERAL, filtramos as diretrizes anteriores da mesma categoria para evitar conflitos!
         let filteredInstructions = prevInstructions;
         if (category !== 'GERAL') {
           filteredInstructions = prevInstructions.filter(instr => getInstructionCategory(instr) !== category);
         }
-        
+
         const nextInstructions = [...filteredInstructions, correctedText];
-        
+
         setGeneratedContent(() => {
           let currentDocText = originalGeneratedContent;
           nextInstructions.forEach(instr => {
             currentDocText = reformulateTextWithInstruction(currentDocText, instr);
           });
+          extractAndSaveEntities(currentDocText);
           return currentDocText;
         });
 
@@ -369,7 +1096,7 @@ export const NewDocument: React.FC = () => {
       const localDocsRaw = localStorage.getItem('legis_documents');
       const localDocs = localDocsRaw ? JSON.parse(localDocsRaw) : [];
       const foundLocal = localDocs.find((d: any) => String(d.id) === String(editId));
-      
+
       if (foundLocal) {
         setTitle(foundLocal.title);
         setDocType(foundLocal.type);
@@ -378,7 +1105,7 @@ export const NewDocument: React.FC = () => {
         setAppliedInstructions([]);
         setDocumentStatus(foundLocal.status);
       }
-      
+
       // 2. Tenta carregar da API (se houver API ativa)
       const fetchDocFromApi = async () => {
         try {
@@ -399,6 +1126,24 @@ export const NewDocument: React.FC = () => {
     }
   }, [searchParams]);
 
+  // Limpa o documento gerado e reinicia o chat ao mudar o tipo de documento
+  useEffect(() => {
+    const editId = searchParams.get('edit');
+    if (!editId) {
+      setGeneratedContent('');
+      setOriginalGeneratedContent('');
+      setAppliedInstructions([]);
+      setChatMessages([
+        {
+          sender: 'ia',
+          text: `Olá! Sou seu assistente de redação oficial. Para começarmos a redigir o seu ${docType === 'OFICIO' ? 'Ofício' : docType === 'MEMORANDO' ? 'Memorando' : docType === 'DECRETO' ? 'Decreto' : 'Ofício de Resposta'
+            }, digite abaixo o que deseja que eu escreva (ex: tema, finalidade, prazos) ou anexe um documento de apoio acima.`,
+          timestamp: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
+        }
+      ]);
+    }
+  }, [docType]);
+
   const handleAnalyzeOficio = async () => {
     if (!attachedFile) {
       setAnalysisError('Para Resposta a Ofício, é obrigatório anexar o documento do ofício recebido.');
@@ -411,7 +1156,7 @@ export const NewDocument: React.FC = () => {
       // Simulação de chamada de análise por IA
       setTimeout(() => {
         const fileNameLower = attachedFile.name.toLowerCase();
-        
+
         // Padrão de Análise de alta fidelidade baseada na imagem real do Ministério Público de Minas Gerais
         let orgao = 'Ministério Público do Estado de Minas Gerais (Promotoria de Justiça de São Domingos do Prata)';
         let autoridade = 'Dr. Aylor Luiz Meirelles Júnior (Promotor de Justiça)';
@@ -438,7 +1183,6 @@ export const NewDocument: React.FC = () => {
         });
         setIsAnalyzing(false);
         setIsAnalysisModalOpen(true);
-        setIsInstructionsSplitOpen(false);
       }, 1500);
     } catch (err) {
       console.error(err);
@@ -493,281 +1237,17 @@ export const NewDocument: React.FC = () => {
         docType === 'OFICIO'
           ? 'Ofício Circular'
           : docType === 'MEMORANDO'
-          ? 'Memorando'
-          : docType === 'RESPOSTA_OFICIO'
-          ? 'Resposta a Ofício'
-          : 'Decreto Municipal';
+            ? 'Memorando'
+            : docType === 'RESPOSTA_OFICIO'
+              ? 'Resposta a Ofício'
+              : 'Decreto Municipal';
       setTitle(`${typeLabel} nº .../${new Date().getFullYear()}`);
     }
 
     // Limpa estados específicos de resposta a ofício ao mudar o tipo
     setAnalysisResult(null);
-    setResponseInstructions('');
     setAnalysisError('');
   }, [docType, searchParams]);
-
-  const verifyPromptDetails = (text: string) => {
-    const missing: string[] = [];
-    const lowerText = text.toLowerCase();
-
-    // 1. Verifica Data (ex: 10/08/2026, 10-08-2026, dia 10, 10 de agosto)
-    const dateRegex = /(\d{2}[/.-]\d{2}[/.-]\d{4}|\d{2}\s+de\s+[a-zA-Z]+|\bdia\s+\d{1,2}\b)/;
-    if (!dateRegex.test(lowerText)) {
-      missing.push('data');
-    }
-
-    // 2. Verifica Hora (ex: 14:00, 14h00, 14 horas)
-    const timeRegex = /(\d{2}h\d{2}|\d{2}:\d{2}|\b\d{1,2}\s*horas\b)/;
-    if (!timeRegex.test(lowerText)) {
-      missing.push('hora');
-    }
-
-    // 3. Verifica Local (rua, praça, avenida, centro, parque, auditório, sala, sede, ginasio, etc.)
-    const localKeywords = ['rua', 'praça', 'praca', 'avenida', 'centro', 'parque', 'clube', 'escola', 'posto', 'hospital', 'auditório', 'auditorio', 'sede', 'sala', 'ginásio', 'ginasio', 'batalhão', 'batalhao'];
-    const hasLocal = localKeywords.some((word) => lowerText.includes(word));
-    if (!hasLocal) {
-      missing.push('local');
-    }
-
-    // 4. Verifica Autoridade / Participantes (prefeito, secretário, comandante, pm, polícia, guarda, etc.)
-    const authKeywords = ['prefeito', 'secretário', 'secretaria', 'diretor', 'comandante', 'vereador', 'pm', 'polícia', 'policia', 'guarda', 'ministro', 'coordenador', 'chefe', 'governador', 'delegado', 'cavaleiro'];
-    const hasAuth = authKeywords.some((word) => lowerText.includes(word));
-    if (!hasAuth) {
-      missing.push('autoridade');
-    }
-
-    return missing;
-  };
-
-  const handleRequestGeneration = () => {
-    const inputForAnalysis = docType === 'RESPOSTA_OFICIO' ? responseInstructions : promptText;
-    if (!inputForAnalysis) return;
-
-    const missing = verifyPromptDetails(inputForAnalysis);
-
-    if (missing.length > 0) {
-      setMissingFields(missing);
-      setIsDetailsModalOpen(true);
-    } else {
-      let finalPrompt = inputForAnalysis;
-      if (attachedFile) {
-        finalPrompt += `\n\n[Documento em anexo: ${attachedFile.name}]`;
-      }
-      handleGenerateIA(finalPrompt);
-    }
-  };
-
-  const handleConfirmDetails = (e: React.FormEvent) => {
-    e.preventDefault();
-    setIsDetailsModalOpen(false);
-
-    let enrichedPrompt = docType === 'RESPOSTA_OFICIO' ? responseInstructions : promptText;
-    const details = [];
-
-    if (detailData) details.push(`Data: ${detailData}`);
-    if (detailHora) details.push(`Hora: ${detailHora}`);
-    if (detailLocal) details.push(`Local: ${detailLocal}`);
-    if (detailAutoridade) details.push(`Autoridade/Participantes: ${detailAutoridade}`);
-
-    if (details.length > 0) {
-      enrichedPrompt += `\n\nDetalhes adicionais fornecidos pelo usuário:\n- ${details.join('\n- ')}`;
-    }
-
-    if (attachedFile) {
-      enrichedPrompt += `\n\n[Documento em anexo: ${attachedFile.name}]`;
-    }
-
-    handleGenerateIA(enrichedPrompt);
-  };
-
-  const handleGenerateIA = async (overridePrompt?: string) => {
-    const finalPrompt = overridePrompt || (docType === 'RESPOSTA_OFICIO' ? responseInstructions : promptText);
-    setIsGenerating(true);
-    setGeneratedContent('');
-    setIsAnalysisModalOpen(false);
-    setIsInstructionsSplitOpen(false);
-
-    try {
-      const { data } = await api.post('/documents/generate-ia', {
-        type: docType,
-        prompt: finalPrompt,
-        municipalityName: docType === 'RESPOSTA_OFICIO' ? 'São José do Goiabal' : profile?.municipality?.name,
-        secretariatName: profile?.secretariat?.name,
-      });
-      setGeneratedContent(data.content);
-      setOriginalGeneratedContent(data.content);
-      setAppliedInstructions([]);
-    } catch (err) {
-      console.error('Erro ao gerar com IA:', err);
-      // Fallback estático e contextualizado em caso de API offline
-      setTimeout(() => {
-        const year = new Date().getFullYear();
-        const typeLabel =
-          docType === 'OFICIO'
-            ? 'OFÍCIO CIRCULAR'
-            : docType === 'MEMORANDO'
-            ? 'MEMORANDO INTERNO'
-            : docType === 'RESPOSTA_OFICIO'
-            ? 'RESPOSTA A OFÍCIO'
-            : 'DECRETO MUNICIPAL';
-        const munNameNormalized = docType === 'RESPOSTA_OFICIO' ? 'São José do Goiabal' : (profile?.municipality?.name || 'Nova Friburgo');
-        const secNameNormalized = profile?.secretariat?.name || 'Secretaria Municipal de Administração';
-        
-        let bodyText = '';
-        const cleanPrompt = finalPrompt.toLowerCase();
-        
-        // Extrai o anexo
-        const fileMatch = finalPrompt.match(/\[Documento em anexo:\s*([^\]]+)\]/);
-        const attachedFileName = fileMatch ? fileMatch[1] : '';
-        const hasAttachment = !!attachedFileName;
-
-        // Remove a tag de anexo do prompt exibido no corpo
-        const cleanPromptDisplay = finalPrompt.replace(/\[Documento em anexo:\s*([^\]]+)\]/, '').trim();
-
-        // Extrai os dados reais preenchidos sem fallbacks inventados
-        const dateMatch = finalPrompt.match(/data:\s*([^\n]+)/i);
-        const timeMatch = finalPrompt.match(/hora:\s*([^\n]+)/i);
-        const localMatch = finalPrompt.match(/local:\s*([^\n]+)/i);
-        const authMatch = finalPrompt.match(/autoridade\/participantes:\s*([^\n]+)/i);
-
-        const extractedData = dateMatch ? dateMatch[1] : '';
-        const extractedHora = timeMatch ? timeMatch[1] : '';
-        const extractedLocal = localMatch ? localMatch[1] : '';
-        const extractedAuth = authMatch ? authMatch[1] : '';
-
-        // Caso 0: Resposta a Ofício
-        if (docType === 'RESPOSTA_OFICIO' && analysisResult) {
-          const formattedResponse = rephraseInstruction(cleanPromptDisplay, analysisResult.tema);
-
-          bodyText = `Ao(À) Excelentíssimo(a) Senhor(a) ${analysisResult.autoridade}
-${analysisResult.orgao}
-
-Assunto: Resposta ao Ofício Requisitório - Tema: ${analysisResult.tema}.
-
-Prezado(a) Senhor(a),
-
-Cumprimentando-o(a) cordialmente e no uso das atribuições que regem as rotinas deste órgão administrativo do Município de ${munNameNormalized}, dirigimo-nos a Vossa Senhoria em resposta ao expediente encaminhado, cuja análise técnica foi formalmente realizada com base no documento anexo "${attachedFileName}".
-
-Em atenção aos pontos solicitados e em observância às diretrizes da administração pública, apresentamos as manifestações e informações requeridas:
-
-${formattedResponse}
-
-Diante do exposto e pautados nos princípios da eficiência e publicidade administrativa (Art. 37 da Constituição Federal), permanecemos à inteira disposição para prestar quaisquer esclarecimentos complementares que se façam necessários.
-
-Atenciosamente,`;
-        }
-        // Caso 1: Cavalgada / PM / Policia / Segurança / Desfile
-        else if (
-          cleanPromptDisplay.toLowerCase().includes('cavalgada') ||
-          cleanPromptDisplay.toLowerCase().includes('pm') ||
-          cleanPromptDisplay.toLowerCase().includes('policia') ||
-          cleanPromptDisplay.toLowerCase().includes('polícia') ||
-          cleanPromptDisplay.toLowerCase().includes('desfile') ||
-          cleanPromptDisplay.toLowerCase().includes('segurança')
-        ) {
-          const pmIntro = hasAttachment
-            ? `Com base na análise do cronograma e plano operacional contidos no documento anexo "${attachedFileName}"`
-            : 'Cumprimentando-o cordialmente';
-
-          const authText = extractedAuth ? extractedAuth : '11º Batalhão de Polícia Militar';
-          const dataText = extractedData ? `no dia ${extractedData}` : 'na data acordada para o referido evento';
-          const horaText = extractedHora ? `com início previsto para as ${extractedHora}` : 'no horário estipulado';
-          const localText = extractedLocal ? `partindo do(a) ${extractedLocal}` : 'partindo da área de concentração indicada';
-
-          bodyText = `Ao Senhor Comandante do ${authText}
-
-Assunto: Solicitação de apoio operacional e policiamento preventivo - Desfile da Cavalgada.
-
-Prezado Comandante,
-
-${pmIntro}, dirigimo-nos a Vossa Senhoria para solicitar o valioso e imprescindível apoio da Polícia Militar no policiamento ostensivo e na escolta de trânsito durante a realização do tradicional Desfile da Cavalgada do Município de ${munNameNormalized}.
-
-Tal solicitação encontra amparo legal no Art. 144 da Constituição Federal de 1988, o qual estabelece a segurança pública como dever do Estado e direito de todos, exercida para a preservação da ordem pública e da incolumidade das pessoas e do patrimônio. O evento está programado para ocorrer ${dataText}, ${horaText}, ${localText} em direção ao Centro Histórico, sendo a cooperação com a corporação indispensável para zelar pela segurança pública de nossa comunidade.
-
-Agradecemos imensamente desde já a vossa costumeira cooperação e nos colocamos à disposição para a realização de reuniões de planejamento integrado.
-
-Atenciosamente,`;
-        }
-        // Caso 2: Merenda Escolar / Educação
-        else if (
-          cleanPrompt.includes('escola') ||
-          cleanPrompt.includes('merenda') ||
-          cleanPrompt.includes('educação') ||
-          cleanPrompt.includes('aluno')
-        ) {
-          const eduIntro = hasAttachment
-            ? `Após análise detida do relatório de insumos e especificações técnicas dispostas no documento anexo "${attachedFileName}"`
-            : 'Entramos em contato para formalizar a necessidade de alinhamento';
-
-          bodyText = `Ao Departamento de Nutrição e Abastecimento Escolar - Secretaria de Educação
-
-Assunto: Planejamento e distribuição de insumos alimentícios - Merenda Escolar.
-
-Prezados,
-
-${eduIntro}, dirigimo-nos a esta diretoria para tratar da otimização do cronograma de distribuição dos alimentos destinados à merenda escolar para as escolas municipais de ${munNameNormalized}.
-
-Esta demanda fundamenta-se nas diretrizes da Lei Federal nº 11.947/2009 (Programa Nacional de Alimentação Escolar - PNAE), que regulamenta a garantia de uma alimentação saudável, adequada e segura para todos os alunos da educação básica pública. Solicitamos que as entregas do próximo trimestre priorizem itens frescos originários da agricultura familiar local, em conformidade com o percentual legal obrigatório de compras públicas sustentáveis.
-
-Certos de vossa presteza no atendimento a esta importante causa educacional, colocamo-nos à disposição para esclarecimentos.
-
-Atenciosamente,`;
-        }
-        // Caso 3: Hospital / Saúde / Insumos
-        else if (
-          cleanPrompt.includes('saúde') ||
-          cleanPrompt.includes('hospital') ||
-          cleanPrompt.includes('insumo') ||
-          cleanPrompt.includes('remédio')
-        ) {
-          const saudeIntro = hasAttachment
-            ? `Tendo em vista a análise técnica do inventário e quadro demonstrativo anexados no documento "${attachedFileName}"`
-            : 'Considerando o aumento sazonal na demanda por atendimentos de emergência nas unidades de saúde';
-
-          bodyText = `À Diretoria de Assistência à Saúde e Farmácia Básica Municipal
-
-Assunto: Providências para reposição imediata de medicamentos e insumos hospitalares.
-
-Prezados Senhores,
-
-${saudeIntro}, solicitamos especial atenção e providências tempestivas para a reposição de insumos críticos de primeiros socorros e medicamentos de distribuição contínua.
-
-Este pedido está respaldado pela Lei Federal nº 8.080/1990 (Lei Orgânica da Saúde), que assegura o direito fundamental à saúde e impõe à administração pública o dever de fornecer assistência terapêutica integral aos cidadãos. A devida reposição é indispensável para mantermos a qualidade do atendimento nas unidades de saúde de ${munNameNormalized} e evitarmos desabastecimentos que prejudiquem nossa população.
-
-Agradecemos o vosso permanente compromisso com a saúde pública municipal e estamos à disposição para auxiliar no trâmite de liberação de dotações orçamentárias.
-
-Atenciosamente,`;
-        }
-        // Caso Geral: Texto formal estruturado
-        else {
-          const geralIntro = hasAttachment
-            ? `Após exame pormenorizado das especificações técnicas anexadas no documento "${attachedFileName}"`
-            : 'Dirigimo-nos a Vossa Senhoria para tratar de assunto relevante para as rotinas deste órgão';
-
-          bodyText = `Ao(À) Senhor(a) Diretor(a) Responsável do Departamento Competente
-
-Assunto: Encaminhamento de diretrizes operacionais em observância às instruções da secretaria.
-
-Prezado(a) Senhor(a),
-
-${geralIntro}, apresentamos formalmente as manifestações técnicas quanto à seguinte demanda: "${cleanPromptDisplay}".
-
-A referida solicitação pauta-se no princípio da eficiência e da legalidade que rege a Administração Pública, conforme preconiza o Art. 37, caput, da Constituição Federal. Solicitamos a adoção das providências administrativas necessárias para instrução do processo e posterior manifestação no menor prazo possível.
-
-Agradecemos vossa costumeira colaboração e colocamo-nos à disposição para apoiar as equipes técnicas envolvidas.
-
-Atenciosamente,`;
-        }
-
-        const fallbackText = `MUNICÍPIO DE ${munNameNormalized.toUpperCase()}\nSECRETARIA MUNICIPAL DE ${secNameNormalized.toUpperCase()}\n\n${typeLabel} Nº 124/${year}\n\n${bodyText}\n\n\n\n\n__________________________________\n${profile?.name || 'Servidor Responsável'}\n${secNameNormalized}`;
-        setGeneratedContent(fallbackText);
-        setOriginalGeneratedContent(fallbackText);
-        setAppliedInstructions([]);
-      }, 1500);
-    } finally {
-      setIsGenerating(false);
-    }
-  };
 
   const handleSaveDocument = async (status: string = 'RASCUNHO') => {
     setIsSaving(true);
@@ -829,6 +1309,20 @@ Atenciosamente,`;
     window.print();
   };
 
+  const renderFormattedText = (text: string) => {
+    if (!text) return '';
+    const parts = text.split(/(\*\*.*?\*\*|\*.*?\*)/g);
+    return parts.map((part, i) => {
+      if (part.startsWith('**') && part.endsWith('**')) {
+        return <strong key={i} className="font-bold text-slate-800">{part.slice(2, -2)}</strong>;
+      }
+      if (part.startsWith('*') && part.endsWith('*')) {
+        return <em key={i} className="italic text-slate-600">{part.slice(1, -1)}</em>;
+      }
+      return part;
+    });
+  };
+
   return (
     <div className="flex flex-col gap-6">
       {/* Topbar do editor */}
@@ -842,13 +1336,25 @@ Atenciosamente,`;
           >
             <ChevronLeft size={20} />
           </Button>
-          <div>
-            <h1 className="text-xl font-extrabold text-slate-900 tracking-tight !m-0">
+          <div className="flex items-center gap-3 flex-1 min-w-0">
+            <h1 className="text-lg font-extrabold text-slate-900 tracking-tight !m-0 shrink-0">
               Gerar Novo Documento
             </h1>
-            <p className="text-xs text-slate-400 mt-0.5">
-              Defina os parâmetros e use a IA para redigir o texto legal.
-            </p>
+            <div className="flex-1 max-w-[400px]">
+              <Input
+                value={title}
+                onChange={(e) => setTitle(e.target.value)}
+                placeholder="Título do documento..."
+                required
+              />
+            </div>
+            <div className="w-[180px] shrink-0">
+              <Select
+                value={docType}
+                onChange={setDocType}
+                options={docTypeOptions}
+              />
+            </div>
           </div>
         </div>
         <div className="flex items-center gap-2">
@@ -888,308 +1394,201 @@ Atenciosamente,`;
 
       {/* Editor Side-by-Side */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-        {/* Painel Esquerdo: Parametrização */}
+        {/* Painel Esquerdo: Parametrização e Chat */}
         <div className="flex flex-col gap-6">
-          <Card className="flex flex-col gap-5">
-            <h3 className="text-base font-bold text-slate-800 border-b border-slate-50 pb-2 flex items-center gap-2">
-              <Sparkles size={16} className="text-gov-gold" /> Parâmetros do Documento
-            </h3>
-
-            <Select
-              label="Tipo de Documento"
-              value={docType}
-              onChange={setDocType}
-              options={docTypeOptions}
-            />
-
-            <Input
-              label="Título do Documento"
-              value={title}
-              onChange={(e) => setTitle(e.target.value)}
-              placeholder="Ex: Resposta ao Ofício nº 012/2026"
-              required
-            />
-
-            {docType === 'RESPOSTA_OFICIO' ? (
-              <div className="flex flex-col gap-5">
-                {/* Campo de Anexo de Ofício (Obrigatório) */}
-                <div className="flex flex-col gap-1.5 text-left">
-                  <div className="flex justify-between items-center">
-                    <label className="text-xs font-semibold text-slate-700 uppercase tracking-wider">
-                      Anexar Ofício Recebido <span className="text-red-500 font-bold">*</span>
-                    </label>
-                    <span className="text-[10px] text-red-500 font-bold uppercase tracking-wider">Obrigatório</span>
-                  </div>
-                  {!attachedFile ? (
-                    <label className="flex flex-col items-center justify-center border-2 border-dashed border-red-200 hover:border-gov-blue rounded-lg p-5 cursor-pointer bg-red-50/10 hover:bg-slate-50 transition-all duration-200">
-                      <div className="flex flex-col items-center justify-center gap-1.5 text-slate-400">
-                        <Paperclip size={20} className="text-red-400" />
-                        <span className="text-xs font-semibold text-slate-600">Clique para anexar o Ofício recebido</span>
-                        <span className="text-[10px] text-slate-400">Formatos aceitos: PDF, DOC, DOCX ou Imagem</span>
-                      </div>
-                      <input
-                        type="file"
-                        accept=".pdf,.doc,.docx,.png,.jpg,.jpeg"
-                        className="hidden"
-                        onChange={handleFileChange}
-                      />
-                    </label>
-                  ) : (
-                    <div className="flex flex-col gap-3">
-                      <div className="flex items-center justify-between border border-slate-200 rounded-lg p-3 bg-white shadow-xs">
-                        <div className="flex items-center gap-3">
-                          <div className="p-2 bg-slate-50 text-gov-blue rounded-lg">
-                            <File size={18} />
-                          </div>
-                          <div className="flex flex-col">
-                            <span className="text-xs font-semibold text-slate-900 truncate max-w-xs">
-                              {attachedFile.name}
-                            </span>
-                            <span className="text-[10px] text-slate-400">
-                              {(attachedFile.size / 1024 / 1024).toFixed(2)} MB
-                            </span>
-                          </div>
-                        </div>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          className="!p-1.5 text-red-500 hover:bg-red-50 rounded-full"
-                          onClick={() => {
-                            setAttachedFile(null);
-                            setAnalysisResult(null);
-                            setResponseInstructions('');
-                          }}
-                        >
-                          <X size={16} />
-                        </Button>
-                      </div>
-
-                      {/* Botão de Análise (se anexou, mas não analisou) */}
-                      {!analysisResult && (
-                        <Button
-                          variant="primary"
-                          onClick={handleAnalyzeOficio}
-                          isLoading={isAnalyzing}
-                          leftIcon={<Sparkles size={16} />}
-                          className="w-full"
-                        >
-                          Analisar Ofício por IA
-                        </Button>
-                      )}
-
-                      {/* Banner do Ofício Analisado */}
-                      {analysisResult && (
-                        <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-3.5 flex items-center justify-between text-left">
-                          <div className="flex items-center gap-2">
-                            <Sparkles size={16} className="text-emerald-600 animate-pulse" />
-                            <div>
-                              <p className="text-xs font-bold text-emerald-800 uppercase">Ofício Analisado por IA</p>
-                              <p className="text-[11px] text-emerald-600 mt-0.5 truncate max-w-[200px]">
-                                {analysisResult.tema}
-                              </p>
-                            </div>
-                          </div>
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            className="text-emerald-700 border-emerald-300 hover:bg-emerald-100/50 shrink-0 font-semibold"
-                            leftIcon={<Sparkles size={12} />}
-                            onClick={() => setIsAnalysisModalOpen(true)}
-                          >
-                            Ver Análise
-                          </Button>
-                        </div>
-                      )}
-                    </div>
-                  )}
-                  {analysisError && (
-                    <p className="text-xs text-red-500 font-medium mt-1">{analysisError}</p>
-                  )}
-                </div>
-              </div>
-            ) : (
-              // Fluxo padrão para outros documentos
-              <div className="flex flex-col gap-5">
-                <div className="flex flex-col gap-1.5 text-left">
-                  <label className="text-xs font-semibold text-slate-700 uppercase tracking-wider">
-                    Instruções para a IA (Prompt)
-                  </label>
-                  <textarea
-                    value={promptText}
-                    onChange={(e) => setPromptText(e.target.value)}
-                    rows={5}
-                    placeholder="Ex: Solicite ao diretor da SEMED a entrega dos relatórios trimestrais de gastos com a merenda escolar, estabelecendo um prazo improrrogável de 5 dias úteis, justificando com a necessidade de prestação de contas à Câmara..."
-                    className="w-full rounded-lg border border-slate-200 bg-white px-4 py-3 text-sm text-slate-900 transition-all focus:border-gov-blue focus:ring-1 focus:ring-gov-blue outline-none placeholder:text-slate-400"
-                    required
-                  />
-                </div>
-
-                <div className="flex flex-col gap-1.5 text-left">
-                  <label className="text-xs font-semibold text-slate-700 uppercase tracking-wider">
-                    Anexar Documento de Apoio (Opcional)
-                  </label>
-                  {!attachedFile ? (
-                    <label className="flex flex-col items-center justify-center border-2 border-dashed border-slate-200 hover:border-gov-blue rounded-lg p-5 cursor-pointer bg-slate-50/50 hover:bg-slate-50 transition-all duration-200">
-                      <div className="flex flex-col items-center justify-center gap-1.5 text-slate-400">
-                        <Paperclip size={20} />
-                        <span className="text-xs font-semibold">Clique para anexar Imagem, PDF ou DOC</span>
-                        <span className="text-[10px] text-slate-400">Tamanho máximo: 10MB</span>
-                      </div>
-                      <input
-                        type="file"
-                        accept=".pdf,.doc,.docx,.png,.jpg,.jpeg"
-                        className="hidden"
-                        onChange={handleFileChange}
-                      />
-                    </label>
-                  ) : (
-                    <div className="flex items-center justify-between border border-slate-200 rounded-lg p-3 bg-white shadow-xs">
-                      <div className="flex items-center gap-3">
-                        <div className="p-2 bg-slate-50 text-gov-blue rounded-lg">
-                          <File size={18} />
-                        </div>
-                        <div className="flex flex-col">
-                          <span className="text-xs font-semibold text-slate-900 truncate max-w-xs">
-                            {attachedFile.name}
-                          </span>
-                          <span className="text-[10px] text-slate-400">
-                            {(attachedFile.size / 1024 / 1024).toFixed(2)} MB
-                          </span>
-                        </div>
-                      </div>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        className="!p-1.5 text-red-500 hover:bg-red-50 rounded-full"
-                        onClick={() => setAttachedFile(null)}
-                      >
-                        <X size={16} />
-                      </Button>
-                    </div>
-                  )}
-                </div>
-
-                <Button
-                  variant="primary"
-                  onClick={handleRequestGeneration}
-                  isLoading={isGenerating}
-                  disabled={!promptText}
-                  leftIcon={<Sparkles size={16} />}
-                  className="w-full mt-2"
-                >
-                  Gerar Redação por IA
-                </Button>
-              </div>
-            )}
-          </Card>
-
-          {/* Chat de Refinamento com IA */}
-          {generatedContent && (
-            <Card className="flex flex-col gap-4 border border-slate-100 p-5 shadow-sm">
-              <div className="flex items-center justify-between border-b border-slate-100 pb-3">
-                <div className="flex items-center gap-2">
-                  <div className="relative">
-                    <span className="flex h-2.5 w-2.5">
-                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-                      <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500"></span>
-                    </span>
-                  </div>
-                  <h3 className="text-sm font-bold text-slate-800 flex items-center gap-1.5">
-                    <MessageSquare size={16} className="text-gov-blue animate-pulse" />
-                    Assistente de Refinamento (IA)
-                  </h3>
-                </div>
-                <span className="text-[10px] bg-slate-100 text-slate-500 px-2 py-0.5 rounded-full font-bold uppercase tracking-wider">
-                  Documento Gerado
+          {/* Campo Compacto de Anexo de Documento de Apoio / Ofício (Acima do Chat) */}
+          <div className="flex flex-col gap-2.5">
+            {!attachedFile ? (
+              <label className={`flex items-center justify-center gap-2.5 border border-dashed rounded-xl py-3 px-4 cursor-pointer transition-all duration-300 transform hover:scale-[1.01] active:scale-[0.99] shadow-xs hover:shadow-md ${docType === 'RESPOSTA_OFICIO'
+                  ? 'border-rose-300 hover:border-rose-500 bg-gradient-to-r from-rose-50/50 to-rose-100/30 hover:from-rose-50 hover:to-rose-100 text-rose-700 font-bold'
+                  : 'border-gov-blue/30 hover:border-gov-blue bg-gradient-to-r from-gov-blue/5 to-gov-blue/10 hover:from-gov-blue/10 hover:to-gov-blue/15 text-gov-blue font-bold'
+                }`}>
+                <Paperclip size={15} className={`transition-transform duration-300 ${docType === 'RESPOSTA_OFICIO' ? "text-rose-600" : "text-gov-blue"}`} />
+                <span className="text-xs uppercase tracking-wider font-extrabold text-[10px]">
+                  {docType === 'RESPOSTA_OFICIO' ? "Anexar Ofício Recebido (Obrigatório)" : "Anexar Documento de Apoio (Opcional)"}
                 </span>
-              </div>
-
-              {/* Lista de Diretrizes Ativas */}
-              {appliedInstructions.length > 0 && (
-                <div className="flex flex-wrap gap-1.5 px-1 pb-1">
-                  <span className="text-[9px] text-slate-400 font-bold uppercase tracking-wider self-center mr-1">
-                    Diretrizes Ativas:
-                  </span>
-                  {appliedInstructions.map((instr, idx) => (
-                    <span
-                      key={idx}
-                      className="text-[9px] bg-slate-100 border border-slate-200 text-slate-600 px-2 py-0.5 rounded-md font-medium truncate max-w-[120px]"
-                      title={instr}
-                    >
-                      {instr}
-                    </span>
-                  ))}
-                </div>
-              )}
-
-              {/* Histórico do Chat */}
-              <div className="flex flex-col gap-3 max-h-[220px] overflow-y-auto p-1 bg-slate-50/50 rounded-xl border border-slate-100 p-3.5" id="chat-messages-container">
-                {chatMessages.map((msg, idx) => (
-                  <div
-                    key={idx}
-                    className={`flex flex-col gap-1 max-w-[85%] ${
-                      msg.sender === 'user' ? 'self-end items-end' : 'self-start items-start'
-                    }`}
-                  >
-                    <div className="flex items-center gap-1">
-                      <span className="text-[9px] font-bold text-slate-400 uppercase tracking-wider">
-                        {msg.sender === 'user' ? (profile?.name?.split(' ')[0] || 'Servidor') : 'Legis AI'}
-                      </span>
-                      <span className="text-[8px] text-slate-400">• {msg.timestamp}</span>
+                <input
+                  type="file"
+                  accept=".pdf,.doc,.docx,.png,.jpg,.jpeg"
+                  className="hidden"
+                  onChange={handleFileChange}
+                />
+              </label>
+            ) : (
+              <div className="flex flex-col gap-2 bg-slate-50 border border-slate-200 rounded-lg p-2.5 shadow-xs">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2.5 min-w-0">
+                    <div className="p-1 bg-white text-gov-blue border border-slate-100 rounded-md shrink-0">
+                      <File size={12} />
                     </div>
-                    <div
-                      className={`text-xs p-3 rounded-2xl leading-relaxed text-left ${
-                        msg.sender === 'user'
-                          ? 'bg-gov-blue text-white rounded-tr-none'
-                          : 'bg-white text-slate-700 border border-slate-200/80 rounded-tl-none shadow-xs'
-                      }`}
-                    >
-                      {msg.text}
+                    <div className="flex flex-col min-w-0">
+                      <span className="text-[11px] font-bold text-slate-800 truncate max-w-[170px]" title={attachedFile.name}>
+                        {attachedFile.name}
+                      </span>
+                      <span className="text-[9px] text-slate-400">
+                        {(attachedFile.size / 1024 / 1024).toFixed(2)} MB
+                      </span>
                     </div>
                   </div>
-                ))}
-                
-                {isChatTyping && (
-                  <div className="flex flex-col gap-1 self-start items-start max-w-[85%]">
-                    <span className="text-[9px] font-bold text-slate-400 uppercase tracking-wider">Legis AI</span>
-                    <div className="bg-white border border-slate-200/80 text-xs p-3 rounded-2xl rounded-tl-none flex items-center gap-1 shadow-xs">
-                      <span className="w-1.5 h-1.5 bg-slate-400 rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
-                      <span className="w-1.5 h-1.5 bg-slate-400 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
-                      <span className="w-1.5 h-1.5 bg-slate-400 rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="!p-1 text-red-500 hover:bg-red-50 rounded-full shrink-0"
+                    onClick={() => {
+                      setAttachedFile(null);
+                      setAnalysisResult(null);
+                    }}
+                  >
+                    <X size={12} />
+                  </Button>
+                </div>
+
+                {/* Botão de Análise de Ofício compacto e condicional */}
+                {docType === 'RESPOSTA_OFICIO' && !analysisResult && (
+                  <Button
+                    variant="primary"
+                    size="sm"
+                    onClick={handleAnalyzeOficio}
+                    isLoading={isAnalyzing}
+                    leftIcon={<Sparkles size={14} />}
+                    className="w-full text-xs py-1"
+                  >
+                    Analisar Ofício por IA
+                  </Button>
+                )}
+
+                {/* Banner do Ofício Analisado compacto e condicional */}
+                {docType === 'RESPOSTA_OFICIO' && analysisResult && (
+                  <div className="bg-emerald-50 border border-emerald-200 rounded-lg p-2 flex items-center justify-between text-left mt-1">
+                    <div className="flex items-center gap-1.5 min-w-0">
+                      <Sparkles size={14} className="text-emerald-600 shrink-0" />
+                      <div className="min-w-0">
+                        <p className="text-[9px] font-bold text-emerald-800 uppercase leading-none">Ofício Analisado</p>
+                        <p className="text-[9px] text-emerald-600 mt-0.5 truncate max-w-[110px]">
+                          {analysisResult.tema}
+                        </p>
+                      </div>
                     </div>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="text-emerald-700 border-emerald-300 hover:bg-emerald-100/50 shrink-0 font-semibold !py-0.5 !px-2 !h-6 text-[9px]"
+                      leftIcon={<Sparkles size={8} />}
+                      onClick={() => setIsAnalysisModalOpen(true)}
+                    >
+                      Ver Análise
+                    </Button>
                   </div>
                 )}
               </div>
+            )}
+            {analysisError && (
+              <p className="text-[11px] text-red-500 font-medium">{analysisError}</p>
+            )}
+          </div>
 
-              {/* Input do Chat */}
-              <form onSubmit={handleSendChatMessage} className="flex gap-2">
-                <input
-                  type="text"
-                  value={chatInput}
-                  onChange={(e) => setChatInput(e.target.value)}
-                  placeholder="Solicite alterações no documento..."
-                  className="flex-1 rounded-lg border border-slate-200 bg-white px-3.5 py-2 text-xs text-slate-900 transition-all focus:border-gov-blue focus:ring-1 focus:ring-gov-blue outline-none placeholder:text-slate-400"
-                  disabled={isChatTyping}
-                />
-                <Button
-                  type="submit"
-                  variant="primary"
-                  size="sm"
-                  className="px-3 shrink-0"
-                  disabled={!chatInput.trim() || isChatTyping}
+          {/* Chat de Geração e Refinamento com IA (Sempre Visível) */}
+          <div className="flex flex-col gap-4 border border-slate-200 bg-white p-5 shadow-xs rounded-2xl">
+            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+              <div className="flex items-center gap-2">
+                <div className="relative">
+                  <span className="flex h-2.5 w-2.5">
+                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                    <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500"></span>
+                  </span>
+                </div>
+                <h3 className="text-sm font-bold text-slate-800 flex items-center gap-1.5">
+                  <MessageSquare size={16} className="text-gov-blue" />
+                  Assistente de Redação Oficial (IA)
+                </h3>
+              </div>
+              <span className="text-[10px] bg-gov-blue/10 text-gov-blue px-2.5 py-0.5 rounded-full font-bold uppercase tracking-wider">
+                {generatedContent ? 'Refinando Documento' : 'Pronto para Redigir'}
+              </span>
+            </div>
+
+            {/* Lista de Diretrizes Ativas (Apenas se o documento já foi gerado e existem regras aplicadas) */}
+            {generatedContent && appliedInstructions.length > 0 && (
+              <div className="flex flex-wrap gap-1.5 px-1 pb-1">
+                <span className="text-[9px] text-slate-400 font-bold uppercase tracking-wider self-center mr-1">
+                  Diretrizes Ativas:
+                </span>
+                {appliedInstructions.map((instr, idx) => (
+                  <span
+                    key={idx}
+                    className="text-[9px] bg-slate-50 border border-slate-200 text-slate-600 px-2 py-0.5 rounded-md font-medium truncate max-w-[120px]"
+                    title={instr}
+                  >
+                    {instr}
+                  </span>
+                ))}
+              </div>
+            )}
+
+            {/* Histórico do Chat */}
+            <div className="flex flex-col gap-4 h-[378px] overflow-y-auto bg-slate-50 border border-slate-100 p-4 rounded-xl shadow-inner" id="chat-messages-container">
+              {chatMessages.map((msg, idx) => (
+                <div
+                  key={idx}
+                  className={`flex flex-col gap-1 max-w-[85%] ${msg.sender === 'user' ? 'self-end items-end' : 'self-start items-start'
+                    }`}
                 >
-                  <Send size={14} />
-                </Button>
-              </form>
-            </Card>
-          )}
+                  <div className="flex items-center gap-1 px-1">
+                    <span className={`text-[9px] font-bold uppercase tracking-wider ${msg.sender === 'user' ? 'text-gov-blue' : 'text-slate-500'}`}>
+                      {msg.sender === 'user' ? (profile?.name?.split(' ')[0] || 'Servidor') : 'Legis AI'}
+                    </span>
+                    <span className="text-[8px] text-slate-400">{msg.timestamp}</span>
+                  </div>
+                  <div
+                    className={`text-xs p-3.5 rounded-2xl leading-relaxed text-left shadow-xs whitespace-pre-wrap ${msg.sender === 'user'
+                        ? 'bg-gov-blue text-white rounded-tr-none'
+                        : 'bg-white text-slate-700 border border-slate-200/80 rounded-tl-none'
+                      }`}
+                  >
+                    {renderFormattedText(msg.text)}
+                  </div>
+                </div>
+              ))}
+
+              {isChatTyping && (
+                <div className="flex flex-col gap-1 self-start items-start max-w-[85%]">
+                  <div className="flex items-center gap-1 px-1">
+                    <span className="text-[9px] font-bold text-slate-500 uppercase tracking-wider">Legis AI</span>
+                  </div>
+                  <div className="bg-white border border-slate-200/80 text-xs p-3 rounded-2xl rounded-tl-none flex items-center gap-1 shadow-xs">
+                    <span className="w-1.5 h-1.5 bg-slate-400 rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
+                    <span className="w-1.5 h-1.5 bg-slate-400 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
+                    <span className="w-1.5 h-1.5 bg-slate-400 rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Input do Chat */}
+            <form onSubmit={handleSendChatMessage} className="flex gap-2">
+              <input
+                type="text"
+                value={chatInput}
+                onChange={(e) => setChatInput(e.target.value)}
+                placeholder={generatedContent ? "Solicite alterações no documento..." : "Digite as instruções para criar a redação..."}
+                className="flex-1 rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-900 transition-all focus:border-gov-blue focus:ring-1 focus:ring-gov-blue outline-none placeholder:text-slate-400 shadow-xs h-11"
+                disabled={isChatTyping}
+              />
+              <Button
+                type="submit"
+                variant="primary"
+                className="px-4 shrink-0 h-11 flex items-center justify-center rounded-xl"
+                disabled={!chatInput.trim() || isChatTyping}
+              >
+                <Send size={15} />
+              </Button>
+            </form>
+          </div>
         </div>
 
         {/* Painel Direito: Pré-visualização A4 */}
         <div className="flex flex-col gap-4">
-          <h3 className="text-sm font-bold text-slate-400 uppercase tracking-wider text-left">
-            Pré-visualização do Documento Oficial (Papel Timbrado)
-          </h3>
+
 
           <div className="bg-white border border-slate-200 rounded-xl shadow-md p-10 min-h-[600px] flex flex-col text-left font-serif leading-relaxed text-slate-800 relative printable-area overflow-hidden">
             {/* Linha colorida do governo */}
@@ -1352,7 +1751,7 @@ Atenciosamente,`;
                         let isBoldArea = true;
                         return (generatedContent || '').split(/\n\n+/).map((para, idx) => {
                           if (!para.trim()) return null;
-                          
+
                           const cleanPara = para.trim().toLowerCase();
                           const currentBold = isBoldArea;
 
@@ -1373,30 +1772,29 @@ Atenciosamente,`;
                             isBoldArea = false;
                           }
 
-                          const isParagraphBold = currentBold && 
-                            !cleanPara.startsWith('prezado') && 
-                            !cleanPara.startsWith('prezada') && 
+                          const isParagraphBold = currentBold &&
+                            !cleanPara.startsWith('prezado') &&
+                            !cleanPara.startsWith('prezada') &&
                             !cleanPara.startsWith('prezados') &&
                             !cleanPara.startsWith('prezadas');
 
                           const isSignatureBlock = cleanPara.includes('_____') || cleanPara.includes('___');
 
-                          const paragraphClass = `whitespace-pre-wrap print-paragraph ${
-                            isSignatureBlock 
-                              ? 'text-center font-normal font-sans border-t-0' 
-                              : isParagraphBold 
-                              ? 'mb-4 font-bold text-slate-950 font-sans' 
-                              : 'mb-4 font-normal font-serif text-slate-800'
-                          }`;
+                          const paragraphClass = `whitespace-pre-wrap print-paragraph ${isSignatureBlock
+                              ? 'text-center font-normal font-sans border-t-0'
+                              : isParagraphBold
+                                ? 'mb-4 font-bold text-slate-950 font-sans'
+                                : 'mb-4 font-normal font-serif text-slate-800'
+                            }`;
 
-                          const extraStyles = isSignatureBlock 
-                            ? { breakInside: 'avoid' as const, pageBreakInside: 'avoid' as const, paddingTop: '6rem' } 
+                          const extraStyles = isSignatureBlock
+                            ? { breakInside: 'avoid' as const, pageBreakInside: 'avoid' as const, paddingTop: '6rem' }
                             : undefined;
 
                           return (
-                            <p 
-                              key={idx} 
-                              className={paragraphClass} 
+                            <p
+                              key={idx}
+                              className={paragraphClass}
                               style={extraStyles}
                             >
                               {para}
@@ -1423,196 +1821,61 @@ Atenciosamente,`;
       </div>
 
 
-      {/* Modal de Detalhes Requeridos pela IA */}
-      <Modal
-        isOpen={isDetailsModalOpen}
-        onClose={() => setIsDetailsModalOpen(false)}
-        title="Detalhes do Documento (Opcional)"
-      >
-        <form onSubmit={handleConfirmDetails} className="flex flex-col gap-5 text-left">
-          <p className="text-sm text-slate-500 leading-relaxed">
-            Identificamos que algumas informações não estão explícitas no seu prompt. Você pode preenchê-las abaixo para enriquecer o documento oficial, ou simplesmente pular esta etapa.
-          </p>
-
-          {missingFields.includes('data') && (
-            <Input
-              label="Data do Evento/Fato"
-              placeholder="Ex: 10/08/2026 ou 12 de Outubro"
-              value={detailData}
-              onChange={(e) => setDetailData(e.target.value)}
-            />
-          )}
-
-          {missingFields.includes('hora') && (
-            <Input
-              label="Horário"
-              placeholder="Ex: 09:00 ou 14:30"
-              value={detailHora}
-              onChange={(e) => setDetailHora(e.target.value)}
-            />
-          )}
-
-          {missingFields.includes('local') && (
-            <Input
-              label="Local de Ocorrência"
-              placeholder="Ex: Parque de Exposições Municipal ou Av. Alberto Braune"
-              value={detailLocal}
-              onChange={(e) => setDetailLocal(e.target.value)}
-            />
-          )}
-
-          {missingFields.includes('autoridade') && (
-            <Input
-              label="Autoridade / Destinatário Participante"
-              placeholder="Ex: Comandante do 11º Batalhão da PM ou Prefeito"
-              value={detailAutoridade}
-              onChange={(e) => setDetailAutoridade(e.target.value)}
-            />
-          )}
-
-          <div className="flex justify-end gap-3 mt-4">
-            <Button
-              type="button"
-              variant="outline"
-              onClick={() => setIsDetailsModalOpen(false)}
-            >
-              Cancelar
-            </Button>
-            <Button
-              type="button"
-              variant="outline"
-              className="text-slate-600 hover:bg-slate-50 border-slate-200"
-              onClick={() => {
-                setIsDetailsModalOpen(false);
-                let finalPrompt = docType === 'RESPOSTA_OFICIO' ? responseInstructions : promptText;
-                if (attachedFile) {
-                  finalPrompt += `\n\n[Documento em anexo: ${attachedFile.name}]`;
-                }
-                handleGenerateIA(finalPrompt);
-              }}
-            >
-              Gerar Sem Preencher
-            </Button>
-            <Button type="submit" variant="primary">
-              Confirmar e Gerar
-            </Button>
-          </div>
-        </form>
-      </Modal>
-
-      {/* Modal de Análise e Instruções de Resposta (Split-Pane Premium) */}
+      {/* Modal de Análise Inteligente de Ofício Recebido */}
       <Modal
         isOpen={isAnalysisModalOpen}
-        onClose={() => {
-          setIsAnalysisModalOpen(false);
-          setIsInstructionsSplitOpen(false);
-        }}
+        onClose={() => setIsAnalysisModalOpen(false)}
         title="Análise Inteligente de Ofício Recebido"
-        size={isInstructionsSplitOpen ? 'xl' : 'lg'}
+        size="lg"
       >
-        <div className="flex flex-col gap-6 text-left">
-          <div className={`grid grid-cols-1 ${isInstructionsSplitOpen ? 'lg:grid-cols-2' : ''} gap-6 transition-all duration-300`}>
-            
-            {/* PAINEL DA ESQUERDA: Resultado da Análise da IA */}
-            <div className="flex flex-col gap-4 bg-slate-50 border border-slate-200 rounded-xl p-5 shadow-sm h-[420px]">
-              <h4 className="text-xs font-bold text-slate-700 uppercase tracking-wider border-b border-slate-200 pb-2 flex items-center gap-2">
-                <Sparkles size={16} className="text-gov-gold animate-pulse" /> 
-                Dados Extraídos do Ofício
-              </h4>
+        <div className="flex flex-col gap-5 text-left">
+          <div className="flex flex-col gap-4 bg-slate-50 border border-slate-200 rounded-xl p-5 shadow-sm">
+            <h4 className="text-xs font-bold text-slate-700 uppercase tracking-wider border-b border-slate-200 pb-2 flex items-center gap-2">
+              <Sparkles size={16} className="text-gov-gold animate-pulse" />
+              Dados Extraídos do Ofício pela IA
+            </h4>
 
-              {analysisResult && (
-                <div className="flex flex-col gap-3 flex-1 justify-between overflow-hidden">
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
-                    <div>
-                      <span className="font-bold text-slate-400 block uppercase tracking-wide mb-0.5">Órgão Emissor:</span>
-                      <span className="text-slate-800 font-semibold bg-white border border-slate-100 rounded-md px-2.5 py-1.5 block leading-relaxed shadow-sm truncate animate-none" title={analysisResult.orgao}>
-                        {analysisResult.orgao}
-                      </span>
-                    </div>
-                    <div>
-                      <span className="font-bold text-slate-400 block uppercase tracking-wide mb-0.5">Autoridade Solicitante:</span>
-                      <span className="text-slate-800 font-semibold bg-white border border-slate-100 rounded-md px-2.5 py-1.5 block leading-relaxed shadow-sm truncate animate-none" title={analysisResult.autoridade}>
-                        {analysisResult.autoridade}
-                      </span>
-                    </div>
-                  </div>
-
-                  <div className="text-xs">
-                    <span className="font-bold text-slate-400 block uppercase tracking-wide mb-0.5">Assunto/Tema Principal:</span>
-                    <span className="text-slate-800 font-semibold bg-white border border-slate-100 rounded-md px-2.5 py-1.5 block leading-relaxed shadow-sm truncate animate-none" title={analysisResult.tema}>
-                      {analysisResult.tema}
+            {analysisResult && (
+              <div className="flex flex-col gap-3">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+                  <div>
+                    <span className="font-bold text-slate-400 block uppercase tracking-wide mb-0.5">Órgão Emissor:</span>
+                    <span className="text-slate-800 font-semibold bg-white border border-slate-100 rounded-md px-2.5 py-1.5 block leading-relaxed shadow-sm truncate animate-none" title={analysisResult.orgao}>
+                      {analysisResult.orgao}
                     </span>
                   </div>
-
-                  <div className="text-xs flex-1 flex flex-col overflow-hidden min-h-0">
-                    <span className="font-bold text-slate-400 block uppercase tracking-wide mb-1">Resumo das Solicitações e Prazos:</span>
-                    <div className="text-slate-600 bg-white border border-slate-100 rounded-lg p-3 leading-relaxed shadow-sm overflow-y-auto flex-1 text-xs">
-                      {analysisResult.resumo}
-                    </div>
+                  <div>
+                    <span className="font-bold text-slate-400 block uppercase tracking-wide mb-0.5">Autoridade Solicitante:</span>
+                    <span className="text-slate-800 font-semibold bg-white border border-slate-100 rounded-md px-2.5 py-1.5 block leading-relaxed shadow-sm truncate animate-none" title={analysisResult.autoridade}>
+                      {analysisResult.autoridade}
+                    </span>
                   </div>
                 </div>
-              )}
-            </div>
 
-            {/* PAINEL DA DIREITA: Entrada de Instruções de Resposta do Usuário */}
-            {isInstructionsSplitOpen && (
-              <div className="flex flex-col gap-4 bg-white border border-slate-200 rounded-xl p-5 shadow-sm animate-in fade-in slide-in-from-right-4 duration-300 h-[420px]">
-                <h4 className="text-xs font-bold text-gov-blue uppercase tracking-wider border-b border-slate-200 pb-2 flex items-center gap-2">
-                  <FileText size={16} /> 
-                  Diretrizes para Redação da Resposta
-                </h4>
+                <div className="text-xs">
+                  <span className="font-bold text-slate-400 block uppercase tracking-wide mb-0.5">Assunto/Tema Principal:</span>
+                  <span className="text-slate-800 font-semibold bg-white border border-slate-100 rounded-md px-2.5 py-1.5 block leading-relaxed shadow-sm truncate animate-none" title={analysisResult.tema}>
+                    {analysisResult.tema}
+                  </span>
+                </div>
 
-                <div className="flex flex-col gap-2 flex-1">
-                  <label className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">
-                    Instruções Técnicas e Argumentação:
-                  </label>
-                  <textarea
-                    value={responseInstructions}
-                    onChange={(e) => setResponseInstructions(e.target.value)}
-                    placeholder="Ex: Informe que a Prefeitura cumpriu os termos de publicidade contratando a dupla por meio da agência licenciada e que os comprovantes de pagamento e a cópia do edital oficial serão anexados em resposta..."
-                    className="w-full h-[270px] resize-none rounded-lg border border-slate-200 bg-slate-50/50 px-4 py-3 text-sm text-slate-900 transition-all focus:border-gov-blue focus:bg-white focus:ring-1 focus:ring-gov-blue outline-none placeholder:text-slate-400 leading-relaxed"
-                    required
-                  />
-                  <p className="text-[10px] text-slate-400 mt-1">
-                    A IA utilizará essas instruções e os dados analisados do ofício para redigir a resposta no formato timbrado legal.
-                  </p>
+                <div className="text-xs flex flex-col">
+                  <span className="font-bold text-slate-400 block uppercase tracking-wide mb-1">Resumo das Solicitações e Prazos:</span>
+                  <div className="text-slate-600 bg-white border border-slate-100 rounded-lg p-3 leading-relaxed shadow-sm max-h-[180px] overflow-y-auto text-xs">
+                    {analysisResult.resumo}
+                  </div>
                 </div>
               </div>
             )}
           </div>
 
-          {/* Botões do Modal */}
-          <div className="flex justify-end gap-3 pt-4 border-t border-slate-100">
+          <div className="flex justify-end gap-3 pt-3 border-t border-slate-100">
             <Button
               variant="outline"
-              onClick={() => {
-                setIsAnalysisModalOpen(false);
-                setIsInstructionsSplitOpen(false);
-              }}
+              onClick={() => setIsAnalysisModalOpen(false)}
             >
               Fechar Análise
             </Button>
-
-            {!isInstructionsSplitOpen ? (
-              <Button
-                variant="primary"
-                leftIcon={<FileText size={16} />}
-                className="bg-gov-blue hover:bg-gov-blue/90"
-                onClick={() => setIsInstructionsSplitOpen(true)}
-              >
-                Instruções de Resposta
-              </Button>
-            ) : (
-              <Button
-                variant="primary"
-                leftIcon={<Sparkles size={16} />}
-                onClick={handleRequestGeneration}
-                isLoading={isGenerating}
-                disabled={!responseInstructions.trim()}
-              >
-                Gerar Resposta com IA
-              </Button>
-            )}
           </div>
         </div>
       </Modal>
@@ -1650,7 +1913,7 @@ export function rephraseInstruction(instruction: string, tema: string): string {
   }
 
   const lower = clean.toLowerCase();
-  
+
   // Heurística de IA inteligente para a contratação artística da Cavalgada (documento real)
   if (
     lower.includes('br brasil') ||
