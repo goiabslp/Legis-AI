@@ -52,7 +52,7 @@ let KnowledgeService = class KnowledgeService {
         const folders = [
             'Constituição',
             'Administração Pública',
-            'Licitações/Acordaos_TCU',
+            'Acórdãos TCU',
             'Licitações/Manuais',
             'Licitações/Perguntas_Respostas',
             'Licitações/Notas_Tecnicas',
@@ -214,7 +214,42 @@ let KnowledgeService = class KnowledgeService {
             return [];
         const queryEmbedding = this.generateEmbedding(query);
         const scoredChunks = store.map((chunk) => {
-            const similarity = this.cosineSimilarity(queryEmbedding, chunk.embedding);
+            const baseSimilarity = this.cosineSimilarity(queryEmbedding, chunk.embedding);
+            let priorityBonus = 0;
+            const cat = chunk.categoria.toLowerCase();
+            if (cat.includes('constituição')) {
+                priorityBonus = 0.25;
+            }
+            else if (cat.includes('administração pública') ||
+                cat.includes('direito civil') ||
+                cat.includes('tributário') ||
+                cat.includes('trabalho') ||
+                cat.includes('saúde') ||
+                cat.includes('educação') ||
+                cat.includes('assistência social') ||
+                cat.includes('meio ambiente') ||
+                cat.includes('eleitoral')) {
+                priorityBonus = 0.18;
+            }
+            else if (cat.includes('decreto')) {
+                priorityBonus = 0.14;
+            }
+            else if (cat.includes('acórdãos tcu') || cat.includes('acordao')) {
+                priorityBonus = 0.11;
+            }
+            else if (cat.includes('jurisprudência') || cat.includes('súmula')) {
+                priorityBonus = 0.08;
+            }
+            else if (cat.includes('agu')) {
+                priorityBonus = 0.06;
+            }
+            else if (cat.includes('cgu') || cat.includes('transparência')) {
+                priorityBonus = 0.04;
+            }
+            else if (cat.includes('redação oficial') || cat.includes('manuais') || cat.includes('licitações')) {
+                priorityBonus = 0.02;
+            }
+            const finalScore = Math.min(1.0, baseSimilarity + priorityBonus * 0.4);
             return {
                 titulo: chunk.titulo,
                 artigo: chunk.artigo,
@@ -222,7 +257,7 @@ let KnowledgeService = class KnowledgeService {
                 palavras_chave: chunk.palavras_chave,
                 texto: chunk.texto,
                 categoria: chunk.categoria,
-                score: similarity,
+                score: finalScore,
             };
         });
         return scoredChunks

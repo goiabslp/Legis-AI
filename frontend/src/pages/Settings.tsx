@@ -1722,10 +1722,14 @@ export const Settings: React.FC = () => {
                         >
                           <option value="Constituição">Constituição / LINDB</option>
                           <option value="Administração Pública">Administração Pública (Leis Gerais)</option>
-                          <option value="Licitações/Acordaos_TCU">Licitações / Acórdãos TCU</option>
-                          <option value="Licitações/Manuais">Licitações / Manuais de Apoio</option>
-                          <option value="Licitações/Perguntas_Respostas">Licitações / Perguntas e Respostas</option>
-                          <option value="Licitações/Notas_Tecnicas">Licitações / Notas Técnicas</option>
+                          <option value="Acórdãos TCU">Acórdãos TCU (Jurisprudência)</option>
+                          
+                          <optgroup label="Licitações">
+                            <option value="Licitações/Manuais">Manuais de Apoio</option>
+                            <option value="Licitações/Perguntas_Respostas">Perguntas e Respostas</option>
+                            <option value="Licitações/Notas_Tecnicas">Notas Técnicas</option>
+                          </optgroup>
+
                           <option value="Saúde">Saúde / SUS</option>
                           <option value="Educação">Educação / Diretrizes</option>
                           <option value="Assistência Social">Assistência Social</option>

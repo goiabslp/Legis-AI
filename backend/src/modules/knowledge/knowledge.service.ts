@@ -28,7 +28,7 @@ export class KnowledgeService implements OnModuleInit {
     const folders = [
       'Constituição',
       'Administração Pública',
-      'Licitações/Acordaos_TCU',
+      'Acórdãos TCU',
       'Licitações/Manuais',
       'Licitações/Perguntas_Respostas',
       'Licitações/Notas_Tecnicas',
@@ -220,7 +220,7 @@ export class KnowledgeService implements OnModuleInit {
     };
   }
 
-  // Pesquisa semântica no banco vetorial via similaridade de cosseno
+  // Pesquisa semântica no banco vetorial via similaridade de cosseno com bônus de prioridade legal
   async search(query: string, limit = 5): Promise<any[]> {
     if (!fs.existsSync(this.storePath)) {
       return [];
@@ -232,7 +232,43 @@ export class KnowledgeService implements OnModuleInit {
     const queryEmbedding = this.generateEmbedding(query);
 
     const scoredChunks = store.map((chunk) => {
-      const similarity = this.cosineSimilarity(queryEmbedding, chunk.embedding);
+      const baseSimilarity = this.cosineSimilarity(queryEmbedding, chunk.embedding);
+      
+      // Aplica bônus de prioridade com base na categoria
+      let priorityBonus = 0;
+      const cat = chunk.categoria.toLowerCase();
+      
+      if (cat.includes('constituição')) {
+        priorityBonus = 0.25; // Prioridade 1: CF/88 e LINDB
+      } else if (
+        cat.includes('administração pública') || 
+        cat.includes('direito civil') || 
+        cat.includes('tributário') || 
+        cat.includes('trabalho') || 
+        cat.includes('saúde') || 
+        cat.includes('educação') || 
+        cat.includes('assistência social') || 
+        cat.includes('meio ambiente') || 
+        cat.includes('eleitoral')
+      ) {
+        priorityBonus = 0.18; // Prioridade 2: Leis Federais
+      } else if (cat.includes('decreto')) {
+        priorityBonus = 0.14; // Prioridade 3: Decretos
+      } else if (cat.includes('acórdãos tcu') || cat.includes('acordao')) {
+        priorityBonus = 0.11; // Prioridade 4: Acórdãos TCU
+      } else if (cat.includes('jurisprudência') || cat.includes('súmula')) {
+        priorityBonus = 0.08; // Prioridade 5: Súmulas STF/STJ
+      } else if (cat.includes('agu')) {
+        priorityBonus = 0.06; // Prioridade 6: AGU
+      } else if (cat.includes('cgu') || cat.includes('transparência')) {
+        priorityBonus = 0.04; // Prioridade 7: CGU
+      } else if (cat.includes('redação oficial') || cat.includes('manuais') || cat.includes('licitações')) {
+        priorityBonus = 0.02; // Prioridade 8: Manuais Técnicos e Oficiais
+      }
+
+      // O score final combina a similaridade base com o bônus de prioridade ponderado
+      const finalScore = Math.min(1.0, baseSimilarity + priorityBonus * 0.4);
+
       return {
         titulo: chunk.titulo,
         artigo: chunk.artigo,
@@ -240,7 +276,7 @@ export class KnowledgeService implements OnModuleInit {
         palavras_chave: chunk.palavras_chave,
         texto: chunk.texto,
         categoria: chunk.categoria,
-        score: similarity,
+        score: finalScore,
       };
     });
 
