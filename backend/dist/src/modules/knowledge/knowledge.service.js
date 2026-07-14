@@ -248,7 +248,19 @@ let KnowledgeService = KnowledgeService_1 = class KnowledgeService {
             throw new Error(`Arquivo não encontrado: ${filePath}`);
         }
         const dataBuffer = fs.readFileSync(filePath);
-        const pdfData = await pdf(dataBuffer);
+        let pdfData;
+        if (typeof pdf === 'function') {
+            pdfData = await pdf(dataBuffer);
+        }
+        else if (pdf && typeof pdf.default === 'function') {
+            pdfData = await pdf.default(dataBuffer);
+        }
+        else if (pdf && typeof pdf.PDFParse === 'function') {
+            pdfData = await pdf.PDFParse(dataBuffer);
+        }
+        else {
+            throw new Error('A biblioteca de extração de PDF (pdf-parse) não possui um método de parse válido.');
+        }
         const text = pdfData.text;
         const fileName = path.basename(filePath, path.extname(filePath));
         const title = fileName.replace(/_/g, ' ');
