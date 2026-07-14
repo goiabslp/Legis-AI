@@ -626,39 +626,6 @@ export const NewDocument: React.FC = () => {
     return false;
   };
 
-  const verifyPromptDetails = (text: string) => {
-    const missing: string[] = [];
-    const lowerText = text.toLowerCase();
-
-    // 1. Verifica Data (ex: 10/08/2026, 10-08-2026, dia 10, 10 de agosto)
-    const dateRegex = /(\d{2}[/.-]\d{2}[/.-]\d{4}|\d{2}\s+de\s+[a-zA-Z]+|\bdia\s+\d{1,2}\b)/;
-    if (!dateRegex.test(lowerText)) {
-      missing.push('data');
-    }
-
-    // 2. Verifica Hora (ex: 14:00, 14h00, 14 horas)
-    const timeRegex = /(\d{2}h\d{2}|\d{2}:\d{2}|\b\d{1,2}\s*horas\b)/;
-    if (!timeRegex.test(lowerText)) {
-      missing.push('hora');
-    }
-
-    // 3. Verifica Local (rua, praça, avenida, centro, parque, auditório, sala, sede, ginasio, etc.)
-    const localKeywords = ['rua', 'praça', 'praca', 'avenida', 'centro', 'parque', 'clube', 'escola', 'posto', 'hospital', 'auditório', 'auditorio', 'sede', 'sala', 'ginásio', 'ginasio', 'batalhão', 'batalhao'];
-    const hasLocal = localKeywords.some((word) => lowerText.includes(word));
-    if (!hasLocal) {
-      missing.push('local');
-    }
-
-    // 4. Verifica Autoridade / Participantes (prefeito, secretário, comandante, pm, polícia, guarda, etc.)
-    const authKeywords = ['prefeito', 'secretário', 'secretaria', 'diretor', 'comandante', 'vereador', 'pm', 'polícia', 'policia', 'guarda', 'ministro', 'coordenador', 'chefe', 'governador', 'delegado', 'cavaleiro'];
-    const hasAuth = authKeywords.some((word) => lowerText.includes(word));
-    if (!hasAuth) {
-      missing.push('autoridade');
-    }
-
-    return missing;
-  };
-
   const handleSendChatMessage = (e: React.FormEvent) => {
     e.preventDefault();
     if (!chatInput.trim()) return;
