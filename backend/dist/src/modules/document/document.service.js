@@ -92,10 +92,10 @@ Atenciosamente,`;
             const extractedHora = timeMatch ? timeMatch[1] : '';
             const extractedLocal = localMatch ? localMatch[1] : '';
             const extractedAuth = authMatch ? authMatch[1] : '';
-            const authText = extractedAuth ? extractedAuth : '11º Batalhão de Polícia Militar do Estado';
-            const dataText = extractedData ? `no dia ${extractedData}` : 'na data acordada para o referido evento';
-            const horaText = extractedHora ? `com início previsto para as ${extractedHora}` : 'no horário estipulado';
-            const localText = extractedLocal ? `partindo do(a) ${extractedLocal}` : 'partindo da área de concentração indicada';
+            const authText = extractedAuth ? extractedAuth : '[AUTORIDADE / DESTINATÁRIO]';
+            const dataText = extractedData ? `no dia ${extractedData}` : 'em [DATA]';
+            const horaText = extractedHora ? `com início previsto para as ${extractedHora}` : 'às [HORÁRIO]';
+            const localText = extractedLocal ? `partindo do(a) ${extractedLocal}` : 'partindo de [LOCAL]';
             bodyText = `Ao Senhor Comandante do ${authText}
  
 Assunto: Solicitação de apoio operacional e policiamento preventivo - Desfile da Cavalgada.
@@ -180,7 +180,7 @@ Atenciosamente,`;
         else {
             fundamentacaoLegal = `\n\n=== ANÁLISE JURÍDICA (Consulta Base de Conhecimento Jurídica) ===\nAlerta do Sistema: Não foi localizada fundamentação suficiente específica para este caso na Base de Conhecimento Jurídica. Conforme as regras de precisão da IA, foi evitada a invenção de dispositivos legais.`;
         }
-        const content = `MUNICÍPIO DE ${munNameNormalized.toUpperCase()}\nSECRETARIA MUNICIPAL DE ${secNameNormalized.toUpperCase()}\n\n${typeLabel} Nº 124/${year}\n\n${bodyText}${fundamentacaoLegal}\n\n\n\n\n__________________________________\nServidor Responsável\n${secNameNormalized}`;
+        const content = `MUNICÍPIO DE ${munNameNormalized.toUpperCase()}\nSECRETARIA MUNICIPAL DE ${secNameNormalized.toUpperCase()}\n\n${typeLabel} Nº [NÚMERO]/${year}\n\n${bodyText}${fundamentacaoLegal}\n\n\n\n\n__________________________________\nServidor Responsável\n${secNameNormalized}`;
         return { content };
     }
     async create(data) {

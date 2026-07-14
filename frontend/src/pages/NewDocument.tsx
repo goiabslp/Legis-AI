@@ -1427,39 +1427,6 @@ export const NewDocument: React.FC = () => {
         return;
       }
 
-      // C. Validação complementar de itens obrigatórios (apenas para tipos que NÃO são Projeto de Lei)
-      const missing = verifyPromptDetails(userText);
-      if (missing.length > 0) {
-        setPendingPrompt(userText);
-
-        setTimeout(() => {
-          const listFields = missing.map(f => {
-            if (f === 'data') return '📅 Data do Evento/Fato';
-            if (f === 'hora') return '⏰ Horário';
-            if (f === 'local') return '📍 Local de Ocorrência';
-            return '👤 Autoridade / Destinatário Participante';
-          }).join('\n');
-
-          const sugAutoridades = learnedContext.autoridades.slice(-2).join(', ');
-          const sugLocais = learnedContext.locais.slice(-2).join(', ');
-          const sugCargos = learnedContext.cargos.slice(-2).join(', ');
-
-          const suggestionBlock = `\n\n💡 **Sugestões gravadas pela IA (digite-os para preencher):**\n` +
-            `• **Autoridades**: ${sugAutoridades || 'Nenhuma gravada'}\n` +
-            `• **Locais**: ${sugLocais || 'Nenhum gravado'}\n` +
-            `• **Cargos**: ${sugCargos || 'Nenhum gravado'}\n\n` +
-            `*(Se preferir gerar o texto sem preencher, basta digitar **"prosseguir"**!)*`;
-
-          setChatMessages(prev => [...prev, {
-            sender: 'ia',
-            text: `📝 Recebi suas instruções para gerar o documento! Contudo, para que a redação oficial fique completa e precisa, notei que faltam os seguintes dados importantes:\n\n${listFields}${suggestionBlock}`,
-            timestamp: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
-          }]);
-          setIsChatTyping(false);
-        }, 1000);
-        return;
-      }
-
       setIsGenerating(true);
 
       const startGeneration = async () => {
@@ -1467,6 +1434,9 @@ export const NewDocument: React.FC = () => {
         if (attachedFile) {
           finalPrompt += `\n\n[Documento em anexo: ${attachedFile.name}]`;
         }
+        
+        // Adiciona instrução de segurança para a IA usar placeholders se faltarem dados complementares
+        finalPrompt += `\n\n[Instrução de Formatação: Caso faltem informações complementares como data, horário, local, nome da autoridade de destino, número de ofício, número de processo ou protocolo, não interrompa a escrita. Gere o rascunho oficial completo utilizando placeholders amigáveis e editáveis em caixa alta como [MUNICÍPIO], [DATA], [NÚMERO], [DESTINATÁRIO], [PROCESSO] ou [PROTOCOLO] nos respectivos campos.]`;
 
         try {
           const { data } = await api.post('/documents/generate-ia', {
@@ -1480,9 +1450,27 @@ export const NewDocument: React.FC = () => {
           extractAndSaveEntities(data.content);
           setAppliedInstructions([]);
 
+          // Analisa placeholders faltantes no conteúdo gerado pela API
+          const generatedText = data.content;
+          const pendencias: string[] = [];
+          if (generatedText.includes('[NÚMERO]')) pendencias.push('Número do documento');
+          if (generatedText.includes('[DATA]')) pendencias.push('Data do evento/fato');
+          if (generatedText.includes('[HORÁRIO]') || generatedText.includes('[HORA]')) pendencias.push('Horário');
+          if (generatedText.includes('[LOCAL]')) pendencias.push('Local de ocorrência');
+          if (generatedText.includes('[DESTINATÁRIO]') || generatedText.includes('[AUTORIDADE]')) pendencias.push('Nome da autoridade / destinatário');
+          if (generatedText.includes('[PROCESSO]')) pendencias.push('Número do processo');
+          if (generatedText.includes('[PROTOCOLO]')) pendencias.push('Número do protocolo');
+
+          let pendenciasText = '';
+          if (pendencias.length > 0) {
+            pendenciasText = `\n\n⚠️ **Pendências identificadas no rascunho (preenchidas com placeholders):**\n` + 
+              pendencias.map(p => `• ${p}`).join('\n') + 
+              `\n\nVocê pode preencher estes dados diretamente no documento editável ao lado!`;
+          }
+
           setChatMessages(prev => [...prev, {
             sender: 'ia',
-            text: '✨ Prontinho! Elaborei a primeira versão do documento oficial ao lado com base nas suas instruções. Revise o texto e, se precisar de qualquer alteração, remoção ou ajuste de tom, basta me pedir aqui no chat!',
+            text: `✨ Prontinho! Elaborei a primeira versão do documento oficial ao lado com base nas suas instruções e na fundamentação jurídica do sistema.${pendenciasText}`,
             timestamp: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
           }]);
         } catch (err) {
@@ -1499,38 +1487,64 @@ export const NewDocument: React.FC = () => {
                   : docType === 'PROJETO_LEI'
                     ? 'PROJETO DE LEI'
                     : 'DECRETO MUNICIPAL';
-          const munNameNormalized = docType === 'RESPOSTA_OFICIO' ? 'São José do Goiabal' : (profile?.municipality?.name || 'Nova Friburgo');
-          const secNameNormalized = profile?.secretariat?.name || 'Secretaria Municipal de Administração';
+          const munNameNormalized = docType === 'RESPOSTA_OFICIO' ? 'São José do Goiabal' : (profile?.municipality?.name || '[MUNICÍPIO]');
+          const secNameNormalized = profile?.secretariat?.name || '[SECRETARIA]';
 
           let bodyText = '';
           const cleanPrompt = userText.toLowerCase();
           const hasAttachment = !!attachedFile;
           const attachedFileName = attachedFile ? attachedFile.name : '';
 
+          // Tenta extrair detalhes preenchidos na resposta do usuário
+          const dateMatch = userText.match(/(\d{2}[/.-]\d{2}[/.-]\d{4}|\d{2}\s+de\s+[a-zA-Z]+|\bdia\s+\d{1,2}\b)/i);
+          const timeMatch = userText.match(/(\d{2}h\d{2}|\d{2}:\d{2}|\b\d{1,2}\s*horas\b)/i);
+
+          const dataText = dateMatch ? dateMatch[0] : '[DATA]';
+          const horaText = timeMatch ? timeMatch[0] : '[HORÁRIO]';
+          const localText = '[LOCAL]';
+          const autoridadeText = '[AUTORIDADE / DESTINATÁRIO]';
+
           if (docType === 'RESPOSTA_OFICIO' && analysisResult) {
             const formattedResponse = rephraseInstruction(userText, analysisResult.tema);
             bodyText = `Ao(À) Excelentíssimo(a) Senhor(a) ${analysisResult.autoridade}\n${analysisResult.orgao}\n\nAssunto: Resposta ao Ofício Requisitório - Tema: ${analysisResult.tema}.\n\nPrezado(a) Senhor(a),\n\nCumprimentando-o(a) cordialmente e no uso das atribuições que regem as rotinas deste órgão administrativo do Município de ${munNameNormalized}, dirigimo-nos a Vossa Senhoria em resposta ao expediente encaminhado, cuja análise técnica foi formalmente realizada com base no documento anexo "${attachedFileName}".\n\nEm atenção aos pontos solicitados e em observância às diretrizes da administração pública, apresentamos as manifestações e informações requeridas:\n\n${formattedResponse}\n\nDiante do exposto e pautados nos princípios da eficiência e publicidade administrativa (Art. 37 da Constituição Federal), permanecemos à inteira disposição para prestar quaisquer esclarecimentos complementares que se façam necessários.\n\nAtenciosamente,`;
           } else if (cleanPrompt.includes('cavalgada') || cleanPrompt.includes('pm') || cleanPrompt.includes('policia') || cleanPrompt.includes('segurança')) {
             const pmIntro = hasAttachment ? `Com base na análise do cronograma e plano operacional contidos no documento anexo "${attachedFileName}"` : 'Cumprimentando-o cordialmente';
-            bodyText = `Ao Senhor Comandante do 11º Batalhão de Polícia Militar\n\nAssunto: Solicitação de apoio operacional e policiamento preventivo - Desfile da Cavalgada.\n\nPrezado Comandante,\n\n${pmIntro}, dirigimo-nos a Vossa Senhoria para solicitar o valioso e imprescindível apoio da Polícia Militar no policiamento ostensivo e na escolta de trânsito durante a realização do tradicional Desfile da Cavalgada do Município de ${munNameNormalized}.\n\nTal solicitação encontra amparo legal no Art. 144 da Constituição Federal de 1988, o qual estabelece a segurança pública como dever do Estado e direito de todos, exercida para a preservação da ordem pública e da incolumidade das pessoas e do patrimônio. O evento está programado para ocorrer na data acordada para o referido evento, no horário estipulado, partindo da área de concentração indicada em direção ao Centro Histórico, sendo a cooperação com a corporação indispensável para zelar pela segurança pública de nossa comunidade.\n\nAgradecemos imensamente desde já a vossa costumeira cooperação e nos colocamos à disposição para a realização de reuniões de planejamento integrado.\n\nAtenciosamente,`;
+            bodyText = `Ao Senhor Comandante do 11º Batalhão de Polícia Militar\n\nAssunto: Solicitação de apoio operacional e policiamento preventivo - Desfile da Cavalgada.\n\nPrezado Comandante,\n\n${pmIntro}, dirigimo-nos a Vossa Senhoria para solicitar o valioso e imprescindível apoio da Polícia Militar no policiamento ostensivo e na escolta de trânsito durante a realização do tradicional Desfile da Cavalgada do Município de ${munNameNormalized}.\n\nTal solicitação encontra amparo legal no Art. 144 da Constituição Federal de 1988, o qual estabelece a segurança pública como dever do Estado e direito de todos, exercida para a preservação da ordem pública e da incolumidade das pessoas e do patrimônio. O evento está programado para ocorrer em ${dataText}, às ${horaText}, partindo da área de concentração indicada em direção ao ${localText}, sendo a cooperação com a corporação indispensável para zelar pela segurança pública de nossa comunidade.\n\nAgradecemos imensamente desde já a vossa costumeira cooperação e nos colocamos à disposição para a realização de reuniões de planejamento integrado.\n\nAtenciosamente,`;
           } else if (cleanPrompt.includes('escola') || cleanPrompt.includes('merenda') || cleanPrompt.includes('educação')) {
             const eduIntro = hasAttachment ? `Após análise detida do relatório de insumos e especificações técnicas dispostas no documento anexo "${attachedFileName}"` : 'Entramos em contato para formalizar a necessidade de alinhamento';
             bodyText = `Ao Departamento de Nutrição e Abastecimento Escolar - Secretaria de Educação\n\nAssunto: Planejamento e distribuição de insumos alimentícios - Merenda Escolar.\n\nPrezados,\n\n${eduIntro}, dirigimo-nos a esta diretoria para tratar da otimização do cronograma de distribuição dos alimentos destinados à merenda escolar para as escolas municipais de ${munNameNormalized}.\n\nEsta demanda fundamenta-se nas diretrizes da Lei Federal nº 11.947/2009 (Programa Nacional de Alimentação Escolar - PNAE), que regulamenta a garantia de uma alimentação saudável, adequada e segura para todos os alunos da educação básica pública. Solicitamos que as entregas do próximo trimestre priorizem itens frescos originários da agricultura familiar local, em conformidade com o percentual legal obrigatório de compras públicas sustentáveis.\n\nCertos de vossa presteza no atendimento a esta importante causa educacional, colocamo-nos à disposição para esclarecimentos.\n\nAtenciosamente,`;
           } else {
             const geralIntro = hasAttachment ? `Após exame pormenorizado das especificações técnicas anexadas no documento anexo "${attachedFileName}"` : 'Dirigimo-nos a Vossa Senhoria para tratar de assunto relevante para as rotinas deste órgão';
-            bodyText = `Ao(À) Senhor(a) Diretor(a) Responsável do Departamento Competente\n\nAssunto: Encaminhamento de diretrizes operacionais em observância às instruções da secretaria.\n\nPrezado(a) Senhor(a),\n\n${geralIntro}, apresentamos formalmente as manifestações técnicas quanto à seguinte demanda: "${userText}".\n\nA referida solicitação pauta-se no princípio da eficiência e da legalidade que rege a Administração Pública, conforme preconiza o Art. 37, caput, da Constituição Federal. Solicitamos a adoção das providências administrativas necessárias para instrução do processo e posterior manifestação no menor prazo possível.\n\nAgradecemos vossa costumeira colaboração e colocamo-nos à disposição para apoiar as equipes técnicas envolvidas.\n\nAtenciosamente,`;
+            bodyText = `Ao(À) Senhor(a) ${autoridadeText}\n\nAssunto: Encaminhamento de diretrizes operacionais em observância às instruções da secretaria.\n\nPrezado(a) Senhor(a),\n\n${geralIntro}, apresentamos formalmente as manifestações técnicas quanto à seguinte demanda: "${userText}".\n\nA referida solicitação pauta-se no princípio da eficiência e da legalidade que rege a Administração Pública, conforme preconiza o Art. 37, caput, da Constituição Federal. Solicitamos a adoção das providências administrativas necessárias para instrução do processo e posterior manifestação no menor prazo possível.\n\nAgradecemos vossa costumeira colaboração e colocamo-nos à disposição para apoiar as equipes técnicas envolvidas.\n\nAtenciosamente,`;
           }
 
-          const fallbackText = `MUNICÍPIO DE ${munNameNormalized.toUpperCase()}\nSECRETARIA MUNICIPAL DE ${secNameNormalized.toUpperCase()}\n\n${typeLabel} Nº 124/${year}\n\n${bodyText}\n\n\n\n\n__________________________________\n${profile?.name || 'Servidor Responsável'}\n${secNameNormalized}`;
+          const fallbackText = `MUNICÍPIO DE ${munNameNormalized.toUpperCase()}\nSECRETARIA MUNICIPAL DE ${secNameNormalized.toUpperCase()}\n\n${typeLabel} Nº [NÚMERO]/${year}\n\n${bodyText}\n\n\n\n\n__________________________________\n${profile?.name || 'Servidor Responsável'}\n${secNameNormalized}`;
 
           setGeneratedContent(fallbackText);
           setOriginalGeneratedContent(fallbackText);
           extractAndSaveEntities(fallbackText);
           setAppliedInstructions([]);
 
+          // Analisa placeholders no fallbackText
+          const pendencias: string[] = [];
+          if (fallbackText.includes('[NÚMERO]')) pendencias.push('Número do documento');
+          if (fallbackText.includes('[DATA]')) pendencias.push('Data do evento/fato');
+          if (fallbackText.includes('[HORÁRIO]')) pendencias.push('Horário');
+          if (fallbackText.includes('[LOCAL]')) pendencias.push('Local de ocorrência');
+          if (fallbackText.includes('[AUTORIDADE / DESTINATÁRIO]')) pendencias.push('Nome da autoridade / destinatário');
+          if (fallbackText.includes('[MUNICÍPIO]')) pendencias.push('Nome do município');
+          if (fallbackText.includes('[SECRETARIA]')) pendencias.push('Nome da secretaria');
+
+          let pendenciasText = '';
+          if (pendencias.length > 0) {
+            pendenciasText = `\n\n⚠️ **Pendências identificadas no rascunho (preenchidas com placeholders):**\n` + 
+              pendencias.map(p => `• ${p}`).join('\n') + 
+              `\n\nVocê pode editar estes campos diretamente no documento ao lado!`;
+          }
+
           setChatMessages(prev => [...prev, {
             sender: 'ia',
-            text: '✨ Prontinho! Elaborei a primeira versão do documento oficial ao lado com base nas suas instruções. Revise o texto e, se precisar de qualquer alteração, remoção ou ajuste de tom, basta me pedir aqui no chat!',
+            text: `✨ Prontinho! Elaborei a primeira versão do documento oficial ao lado com base nas suas instruções.${pendenciasText}`,
             timestamp: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
           }]);
         } finally {

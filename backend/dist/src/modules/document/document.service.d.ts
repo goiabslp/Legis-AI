@@ -16,13 +16,13 @@ export declare class DocumentService {
         authorId: string;
     }): Promise<{
         id: string;
-        createdAt: Date;
-        updatedAt: Date;
-        secretariatId: string;
         title: string;
         content: string;
         type: string;
         status: string;
+        createdAt: Date;
+        updatedAt: Date;
+        secretariatId: string;
         authorId: string;
     }>;
     findRecent(secretariatId: string): Promise<({
@@ -31,13 +31,13 @@ export declare class DocumentService {
         };
     } & {
         id: string;
-        createdAt: Date;
-        updatedAt: Date;
-        secretariatId: string;
         title: string;
         content: string;
         type: string;
         status: string;
+        createdAt: Date;
+        updatedAt: Date;
+        secretariatId: string;
         authorId: string;
     })[]>;
     findBySecretariat(secretariatId: string): Promise<({
@@ -46,13 +46,13 @@ export declare class DocumentService {
         };
     } & {
         id: string;
-        createdAt: Date;
-        updatedAt: Date;
-        secretariatId: string;
         title: string;
         content: string;
         type: string;
         status: string;
+        createdAt: Date;
+        updatedAt: Date;
+        secretariatId: string;
         authorId: string;
     })[]>;
     getStats(secretariatId: string, userId: string): Promise<{
