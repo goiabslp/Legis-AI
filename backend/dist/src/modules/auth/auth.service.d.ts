@@ -14,11 +14,11 @@ export declare class AuthService {
     register(dto: RegisterDto): Promise<{
         user: {
             id: string;
-            email: string;
             name: string;
-            role: string;
             createdAt: Date;
             updatedAt: Date;
+            email: string;
+            role: string;
             secretariatId: string | null;
             municipalityId: string;
         };
@@ -32,12 +32,12 @@ export declare class AuthService {
         };
         municipality: {
             id: string;
-            name: string;
-            createdAt: Date;
-            updatedAt: Date;
             cnpj: string;
+            name: string;
             logoUrl: string | null;
             primaryColor: string;
+            createdAt: Date;
+            updatedAt: Date;
         };
     }>;
 }

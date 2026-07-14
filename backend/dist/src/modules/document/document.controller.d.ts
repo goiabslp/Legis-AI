@@ -19,13 +19,13 @@ export declare class DocumentController {
         authorId?: string;
     }): Promise<{
         id: string;
+        createdAt: Date;
+        updatedAt: Date;
+        secretariatId: string;
         title: string;
         content: string;
         type: string;
         status: string;
-        createdAt: Date;
-        updatedAt: Date;
-        secretariatId: string;
         authorId: string;
     }>;
     findRecent(secretariatId?: string): Promise<({
@@ -34,13 +34,13 @@ export declare class DocumentController {
         };
     } & {
         id: string;
+        createdAt: Date;
+        updatedAt: Date;
+        secretariatId: string;
         title: string;
         content: string;
         type: string;
         status: string;
-        createdAt: Date;
-        updatedAt: Date;
-        secretariatId: string;
         authorId: string;
     })[]>;
     getStats(secretariatId?: string, userId?: string): Promise<{
