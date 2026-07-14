@@ -248,20 +248,23 @@ let KnowledgeService = KnowledgeService_1 = class KnowledgeService {
             throw new Error(`Arquivo não encontrado: ${filePath}`);
         }
         const dataBuffer = fs.readFileSync(filePath);
-        let pdfData;
+        let text = '';
         if (typeof pdf === 'function') {
-            pdfData = await pdf(dataBuffer);
+            const pdfData = await pdf(dataBuffer);
+            text = pdfData.text;
         }
         else if (pdf && typeof pdf.default === 'function') {
-            pdfData = await pdf.default(dataBuffer);
+            const pdfData = await pdf.default(dataBuffer);
+            text = pdfData.text;
         }
         else if (pdf && typeof pdf.PDFParse === 'function') {
-            pdfData = await pdf.PDFParse(dataBuffer);
+            const parser = new pdf.PDFParse({ data: dataBuffer });
+            const result = await parser.getText();
+            text = result.text;
         }
         else {
             throw new Error('A biblioteca de extração de PDF (pdf-parse) não possui um método de parse válido.');
         }
-        const text = pdfData.text;
         const fileName = path.basename(filePath, path.extname(filePath));
         const title = fileName.replace(/_/g, ' ');
         const newChunks = this.chunkText(text, title, category, source);

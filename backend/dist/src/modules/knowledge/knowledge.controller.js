@@ -81,20 +81,27 @@ let KnowledgeController = class KnowledgeController {
         }
         const cat = category || 'Geral';
         const src = source || 'NACIONAL';
+        const rootPath = path.join(process.cwd().endsWith('backend') ? path.resolve(process.cwd(), '..') : process.cwd(), 'Conhecimento');
+        const destinationFolder = path.join(rootPath, cat);
+        if (!fs.existsSync(destinationFolder)) {
+            fs.mkdirSync(destinationFolder, { recursive: true });
+        }
+        const finalPath = path.join(destinationFolder, file.filename);
+        fs.renameSync(file.path, finalPath);
         try {
-            const fileBuffer = fs.readFileSync(file.path);
+            const fileBuffer = fs.readFileSync(finalPath);
             const folder = src.toLowerCase();
             await this.knowledgeService.uploadToSupabase(fileBuffer, file.filename, file.mimetype, folder);
         }
         catch (e) {
         }
-        const chunksCount = await this.knowledgeService.indexFile(file.path, cat, src);
+        const chunksCount = await this.knowledgeService.indexFile(finalPath, cat, src);
         return {
             success: true,
             message: `Arquivo ${file.filename} adicionado e indexado na categoria "${cat}" (${src}) com sucesso.`,
             filename: file.filename,
             sizeBytes: file.size,
-            path: file.path,
+            path: finalPath,
             category: cat,
             source: src,
             chunksCount,
@@ -127,13 +134,11 @@ __decorate([
     (0, common_1.UseInterceptors)((0, platform_express_1.FileInterceptor)('file', {
         storage: (0, multer_1.diskStorage)({
             destination: (req, file, cb) => {
-                const rootPath = path.join(process.cwd().endsWith('backend') ? path.resolve(process.cwd(), '..') : process.cwd(), 'Conhecimento');
-                const category = req.body.category || 'Geral';
-                const destinationPath = path.join(rootPath, category);
-                if (!fs.existsSync(destinationPath)) {
-                    fs.mkdirSync(destinationPath, { recursive: true });
+                const dest = path.join(process.cwd().endsWith('backend') ? process.cwd() : path.join(process.cwd(), 'backend'), 'uploads');
+                if (!fs.existsSync(dest)) {
+                    fs.mkdirSync(dest, { recursive: true });
                 }
-                cb(null, destinationPath);
+                cb(null, dest);
             },
             filename: (req, file, cb) => {
                 const safeName = file.originalname.replace(/[^a-zA-Z0-9.\-_]/g, '_');

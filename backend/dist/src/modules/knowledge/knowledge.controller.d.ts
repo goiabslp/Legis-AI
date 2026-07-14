@@ -14,7 +14,7 @@ export declare class KnowledgeController {
         message: string;
         filename: any;
         sizeBytes: any;
-        path: any;
+        path: string;
         category: string;
         source: string;
         chunksCount: number;

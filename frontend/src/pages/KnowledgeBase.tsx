@@ -67,7 +67,6 @@ export const KnowledgeBase: React.FC = () => {
 
     setIsUploading(true);
     const formData = new FormData();
-    formData.append('file', selectedFile);
     formData.append('category', uploadCategory);
     
     // Mapeia a fonte com base na aba ativa do frontend
@@ -78,6 +77,7 @@ export const KnowledgeBase: React.FC = () => {
       'rag-console': 'NACIONAL'
     };
     formData.append('source', sourceMap[activeTab]);
+    formData.append('file', selectedFile);
 
     try {
       const response = await api.post('/knowledge/upload', formData, {

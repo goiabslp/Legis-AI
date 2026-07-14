@@ -47,18 +47,14 @@ export class KnowledgeController {
     FileInterceptor('file', {
       storage: diskStorage({
         destination: (req: any, file: any, cb: any) => {
-          const rootPath = path.join(
-            process.cwd().endsWith('backend') ? path.resolve(process.cwd(), '..') : process.cwd(),
-            'Conhecimento'
+          const dest = path.join(
+            process.cwd().endsWith('backend') ? process.cwd() : path.join(process.cwd(), 'backend'),
+            'uploads'
           );
-          // Pega a categoria do body da requisição
-          const category = req.body.category || 'Geral';
-          const destinationPath = path.join(rootPath, category);
-          
-          if (!fs.existsSync(destinationPath)) {
-            fs.mkdirSync(destinationPath, { recursive: true });
+          if (!fs.existsSync(dest)) {
+            fs.mkdirSync(dest, { recursive: true });
           }
-          cb(null, destinationPath);
+          cb(null, dest);
         },
         filename: (req: any, file: any, cb: any) => {
           const safeName = file.originalname.replace(/[^a-zA-Z0-9.\-_]/g, '_');
@@ -79,23 +75,37 @@ export class KnowledgeController {
     const cat = category || 'Geral';
     const src = source || 'NACIONAL';
 
+    // Determina a pasta raiz final do Conhecimento
+    const rootPath = path.join(
+      process.cwd().endsWith('backend') ? path.resolve(process.cwd(), '..') : process.cwd(),
+      'Conhecimento'
+    );
+    const destinationFolder = path.join(rootPath, cat);
+    if (!fs.existsSync(destinationFolder)) {
+      fs.mkdirSync(destinationFolder, { recursive: true });
+    }
+    const finalPath = path.join(destinationFolder, file.filename);
+
+    // Move o arquivo temporário para o destino final da categoria
+    fs.renameSync(file.path, finalPath);
+
     try {
-      const fileBuffer = fs.readFileSync(file.path);
+      const fileBuffer = fs.readFileSync(finalPath);
       const folder = src.toLowerCase();
       await this.knowledgeService.uploadToSupabase(fileBuffer, file.filename, file.mimetype, folder);
     } catch (e) {
       // Ignora erro no upload do supabase para continuar localmente
     }
 
-    // Indexa o arquivo que acabou de ser adicionado no pgvector
-    const chunksCount = await this.knowledgeService.indexFile(file.path, cat, src);
+    // Indexa o arquivo que acabou de ser adicionado no pgvector a partir do caminho final correto
+    const chunksCount = await this.knowledgeService.indexFile(finalPath, cat, src);
 
     return {
       success: true,
       message: `Arquivo ${file.filename} adicionado e indexado na categoria "${cat}" (${src}) com sucesso.`,
       filename: file.filename,
       sizeBytes: file.size,
-      path: file.path,
+      path: finalPath,
       category: cat,
       source: src,
       chunksCount,

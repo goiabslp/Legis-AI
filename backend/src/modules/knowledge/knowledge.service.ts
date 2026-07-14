@@ -248,18 +248,20 @@ export class KnowledgeService implements OnModuleInit {
 
     const dataBuffer = fs.readFileSync(filePath);
     
-    let pdfData;
+    let text = '';
     if (typeof pdf === 'function') {
-      pdfData = await (pdf as any)(dataBuffer);
+      const pdfData = await (pdf as any)(dataBuffer);
+      text = pdfData.text;
     } else if (pdf && typeof (pdf as any).default === 'function') {
-      pdfData = await (pdf as any).default(dataBuffer);
+      const pdfData = await (pdf as any).default(dataBuffer);
+      text = pdfData.text;
     } else if (pdf && typeof (pdf as any).PDFParse === 'function') {
-      pdfData = await (pdf as any).PDFParse(dataBuffer);
+      const parser = new (pdf as any).PDFParse({ data: dataBuffer });
+      const result = await parser.getText();
+      text = result.text;
     } else {
       throw new Error('A biblioteca de extração de PDF (pdf-parse) não possui um método de parse válido.');
     }
-
-    const text = pdfData.text;
 
     const fileName = path.basename(filePath, path.extname(filePath));
     const title = fileName.replace(/_/g, ' ');
