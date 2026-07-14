@@ -20,9 +20,9 @@ let SupabaseService = SupabaseService_1 = class SupabaseService {
     supabaseClientInstance;
     constructor(configService) {
         this.configService = configService;
-        const supabaseUrl = this.configService.get('SUPABASE_URL') || '';
-        const supabaseKey = this.configService.get('SUPABASE_ANON_KEY') || '';
-        if (!supabaseUrl || !supabaseKey) {
+        const supabaseUrl = this.configService.get('SUPABASE_URL') || 'https://placeholder-project-id.supabase.co';
+        const supabaseKey = this.configService.get('SUPABASE_ANON_KEY') || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBsYWNlaG9sZGVyIiwicm9sZSI6ImFub24iLCJpYXQiOjE1OTg4ODMwMDAsImV4cCI6MTkwNDQ0NzAwMH0.placeholder';
+        if (!this.configService.get('SUPABASE_URL') || !this.configService.get('SUPABASE_ANON_KEY')) {
             this.logger.warn('Supabase URL ou Anon Key não configuradas no .env. Funcionalidades integradas com o Supabase podem falhar.');
         }
         this.supabaseClientInstance = (0, supabase_js_1.createClient)(supabaseUrl, supabaseKey, {
