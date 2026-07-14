@@ -249,6 +249,9 @@ let KnowledgeService = class KnowledgeService {
             else if (cat.includes('redação oficial') || cat.includes('manuais') || cat.includes('licitações')) {
                 priorityBonus = 0.02;
             }
+            else if (cat.includes('projeto de lei')) {
+                priorityBonus = 0.16;
+            }
             const finalScore = Math.min(1.0, baseSimilarity + priorityBonus * 0.4);
             return {
                 titulo: chunk.titulo,

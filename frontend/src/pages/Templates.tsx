@@ -96,7 +96,7 @@ export const Templates: React.FC = () => {
         </div>
         
         <div className="flex gap-2 w-full md:w-auto overflow-x-auto pb-1">
-          {['ALL', 'OFICIO', 'MEMORANDO', 'DECRETO', 'EDITAL'].map((type) => (
+          {['ALL', 'OFICIO', 'MEMORANDO', 'DECRETO', 'EDITAL', 'PROJETO_LEI'].map((type) => (
             <Button
               key={type}
               variant={filterType === type ? 'primary' : 'outline'}
@@ -112,6 +112,8 @@ export const Templates: React.FC = () => {
                 ? 'Memorandos'
                 : type === 'DECRETO'
                 ? 'Decretos'
+                : type === 'PROJETO_LEI'
+                ? 'Projetos de Lei'
                 : 'Editais'}
             </Button>
           ))}

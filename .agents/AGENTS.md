@@ -6,6 +6,7 @@ Você é responsável por estudar, organizar, estruturar e armazenar permanentem
 Contém de forma estruturada e permanente as normas e manuais:
 - **Constituição e Normas Fundamentais:** Constituição Federal de 1988, LINDB.
 - **Administração Pública:** Leis 14.133/2021, 8.429/1992, 12.527/2011, 13.709/2018 (LGPD), 9.784/1999, LRF (LC 101/2000), Lei 4.320/1964, LC 123/2006.
+- **Projeto de Lei:** Proposições legislativas municipais, estaduais e federais, incluindo PL, PLP, PEC e suas justificativas.
 - **Direito Civil & Tributário:** Código Civil, CPC, CTN.
 - **Direito do Trabalho:** CLT, Leis 8.212/1991 e 8.213/1991.
 - **Saúde & Educação:** Leis 8.080/1990 e 8.142/1990, RENAME, RENASES, LDB, FUNDEB.

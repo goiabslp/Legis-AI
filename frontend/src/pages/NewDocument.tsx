@@ -15,6 +15,7 @@ import {
   Gavel,
   Megaphone,
   Scale,
+  ScrollText,
   MessageSquare,
   Send,
 } from 'lucide-react';
@@ -91,7 +92,7 @@ export const NewDocument: React.FC = () => {
 
   interface ChatFlowState {
     isActive: boolean;
-    docType: 'convite' | 'geral';
+    docType: 'convite' | 'geral' | 'projeto_lei';
     step: number;
     hasMultipleDays?: boolean;
     data: {
@@ -100,6 +101,10 @@ export const NewDocument: React.FC = () => {
       local?: string;
       autoridades?: string;
       atracoes?: string;
+      justificativa?: string;
+      fundamentacao?: string;
+      artigos?: string;
+      disposicoes?: string;
     };
   }
 
@@ -416,6 +421,194 @@ export const NewDocument: React.FC = () => {
     setLearnedContext(currentCtx);
   };
 
+  // === VALIDAÇÃO CONSTITUCIONAL CONTRA A BASE NACIONAL DE CONHECIMENTO ===
+  const validateConstitutionality = (tema: string): { isUnconstitutional: boolean; alert: string; fundamentacao: string } => {
+    const lower = tema.toLowerCase();
+    
+    // Catálogo de vedações constitucionais e competências exclusivas
+    const prohibitions: Array<{
+      keywords: string[];
+      alert: string;
+      fundamentacao: string;
+    }> = [
+      {
+        keywords: ['pena de morte', 'execução', 'matar condenado', 'morte como pena'],
+        alert: 'A **pena de morte** é expressamente **vedada** pela Constituição Federal de 1988 como cláusula pétrea. A proposta é **inconstitucional** e não pode ser objeto de Projeto de Lei em qualquer esfera federativa (municipal, estadual ou federal).',
+        fundamentacao: '• **Art. 5º, inciso XLVII, alínea "a" da CF/88:** "Não haverá penas de caráter perpétuo, de morte (salvo em caso de guerra declarada, nos termos do art. 84, XIX), de trabalhos forçados, de banimento ou cruéis."\n\n• **Art. 60, §4º, inciso IV da CF/88 (Cláusulas Pétreas):** "Não será objeto de deliberação a proposta de emenda tendente a abolir: IV - os direitos e garantias individuais."\n\n• **Pacto de São José da Costa Rica (Art. 4º):** O Brasil é signatário e proíbe a restauração da pena de morte em países que já a aboliram.\n\n• **Competência municipal (Art. 30 da CF/88):** O Município não possui competência legislativa em matéria penal, que é privativa da União (Art. 22, I da CF/88).',
+      },
+      {
+        keywords: ['tortura', 'torturar', 'suplício'],
+        alert: 'A **tortura** é crime inafiançável e insuscetível de graça, sendo proibida pela Constituição Federal como direito fundamental inviolável.',
+        fundamentacao: '• **Art. 5º, inciso III da CF/88:** "Ninguém será submetido a tortura nem a tratamento desumano ou degradante."\n\n• **Art. 5º, inciso XLIII da CF/88:** "A lei considerará crimes inafiançáveis e insuscetíveis de graça ou anistia a prática da tortura..."\n\n• **Lei nº 9.455/1997** (Lei da Tortura).',
+      },
+      {
+        keywords: ['censura', 'proibir imprensa', 'censurar', 'calar imprensa', 'proibir manifestação'],
+        alert: 'A **censura** é expressamente vedada pela Constituição Federal. A liberdade de expressão e de imprensa são direitos fundamentais protegidos como cláusulas pétreas.',
+        fundamentacao: '• **Art. 5º, inciso IX da CF/88:** "É livre a expressão da atividade intelectual, artística, científica e de comunicação, independentemente de censura ou licença."\n\n• **Art. 220, §2º da CF/88:** "É vedada toda e qualquer censura de natureza política, ideológica e artística."',
+      },
+      {
+        keywords: ['trabalho escravo', 'escravidão', 'trabalho forçado', 'servidão'],
+        alert: 'O **trabalho escravo e forçado** é expressamente proibido pela Constituição Federal e por tratados internacionais ratificados pelo Brasil.',
+        fundamentacao: '• **Art. 5º, inciso XLVII, alínea "c" da CF/88:** "Não haverá penas de trabalhos forçados."\n\n• **Art. 149 do Código Penal** (crime de redução a condição análoga à de escravo).\n\n• **Convenção nº 29 da OIT** (Trabalho Forçado).',
+      },
+      {
+        keywords: ['discriminação racial', 'racismo', 'segregação', 'apartheid', 'discriminar raça'],
+        alert: 'O **racismo** é crime inafiançável e imprescritível, sujeito à pena de reclusão conforme a Constituição Federal.',
+        fundamentacao: '• **Art. 5º, inciso XLII da CF/88:** "A prática do racismo constitui crime inafiançável e imprescritível, sujeito à pena de reclusão, nos termos da lei."\n\n• **Lei nº 7.716/1989** (Lei do Racismo).',
+      },
+      {
+        keywords: ['cassar direito', 'suspender voto', 'proibir voto', 'impedir eleição', 'acabar eleição', 'fim da democracia'],
+        alert: 'O **voto direto, secreto, universal e periódico** é cláusula pétrea e não pode ser restringido por nenhum ente federativo.',
+        fundamentacao: '• **Art. 60, §4º, inciso II da CF/88:** "Não será objeto de deliberação a proposta de emenda tendente a abolir: II - o voto direto, secreto, universal e periódico."\n\n• **Art. 14 da CF/88:** "A soberania popular será exercida pelo sufrágio universal e pelo voto direto e secreto."',
+      },
+      {
+        keywords: ['extraditar brasileiro', 'deportar brasileiro', 'banir cidadão', 'exilar', 'banimento'],
+        alert: 'A **extradição de brasileiro nato** e o **banimento** são expressamente proibidos pela Constituição Federal.',
+        fundamentacao: '• **Art. 5º, inciso LI da CF/88:** "Nenhum brasileiro será extraditado, salvo o naturalizado."\n\n• **Art. 5º, inciso XLVII, alínea "d" da CF/88:** "Não haverá penas de banimento."',
+      },
+      {
+        keywords: ['privatizar sus', 'acabar sus', 'extinguir saúde pública', 'fim saúde gratuita'],
+        alert: 'A **saúde é direito de todos e dever do Estado**, garantida pela Constituição Federal. A extinção do SUS é inconstitucional.',
+        fundamentacao: '• **Art. 196 da CF/88:** "A saúde é direito de todos e dever do Estado, garantido mediante políticas sociais e econômicas."\n\n• **Art. 198 da CF/88:** Institui o Sistema Único de Saúde (SUS).\n\n• **Lei nº 8.080/1990** (Lei Orgânica da Saúde).',
+      },
+      {
+        keywords: ['acabar escola pública', 'fim educação', 'extinguir ensino', 'proibir escola'],
+        alert: 'A **educação é direito de todos e dever do Estado e da família**, garantida pela Constituição Federal como direito fundamental social.',
+        fundamentacao: '• **Art. 205 da CF/88:** "A educação, direito de todos e dever do Estado e da família, será promovida e incentivada com a colaboração da sociedade."\n\n• **Art. 208 da CF/88:** Garante ensino fundamental obrigatório e gratuito.\n\n• **Lei nº 9.394/1996** (LDB).',
+      },
+      {
+        keywords: ['prisão perpétua', 'perpétua', 'cadeia eterna', 'preso para sempre'],
+        alert: 'A **prisão de caráter perpétuo** é expressamente vedada pela Constituição Federal como cláusula pétrea.',
+        fundamentacao: '• **Art. 5º, inciso XLVII, alínea "b" da CF/88:** "Não haverá penas de caráter perpétuo."\n\n• **Art. 60, §4º, inciso IV da CF/88 (Cláusulas Pétreas).**',
+      },
+      {
+        keywords: ['criar imposto federal', 'legislar sobre penal', 'direito penal municipal', 'código penal municipal', 'crime municipal'],
+        alert: 'A matéria proposta é de **competência legislativa privativa da União** e não pode ser objeto de legislação municipal.',
+        fundamentacao: '• **Art. 22, inciso I da CF/88:** "Compete privativamente à União legislar sobre: I - direito civil, comercial, penal, processual..."\n\n• **Art. 30 da CF/88** delimita as competências municipais a assuntos de interesse local.',
+      },
+    ];
+
+    for (const rule of prohibitions) {
+      if (rule.keywords.some(kw => lower.includes(kw))) {
+        return {
+          isUnconstitutional: true,
+          alert: rule.alert,
+          fundamentacao: rule.fundamentacao,
+        };
+      }
+    }
+
+    return { isUnconstitutional: false, alert: '', fundamentacao: '' };
+  };
+
+  // === BUSCA AUTOMÁTICA DE FUNDAMENTAÇÃO LEGAL NA BASE NACIONAL ===
+  const getAutoFundamentacao = (tema: string, justificativa: string): string => {
+    const texto = (tema + ' ' + justificativa).toLowerCase();
+    const dispositivos: string[] = [];
+
+    // Base constitucional obrigatória (sempre incluída)
+    dispositivos.push('• Art. 30, incisos I e II da Constituição Federal de 1988 — competência do Município para legislar sobre assuntos de interesse local e suplementar a legislação federal e estadual no que couber.');
+    dispositivos.push('• Art. 37, caput da CF/88 — princípios da Administração Pública: legalidade, impessoalidade, moralidade, publicidade e eficiência.');
+
+    // Saúde
+    if (texto.includes('saúde') || texto.includes('saude') || texto.includes('hospital') || texto.includes('ubs') || texto.includes('sus') || texto.includes('vacinação') || texto.includes('epidemia') || texto.includes('pandemia') || texto.includes('sanitário') || texto.includes('sanitaria')) {
+      dispositivos.push('• Art. 196 da CF/88 — "A saúde é direito de todos e dever do Estado, garantido mediante políticas sociais e econômicas."');
+      dispositivos.push('• Art. 198 da CF/88 — Sistema Único de Saúde (SUS), ações e serviços públicos de saúde.');
+      dispositivos.push('• Lei nº 8.080/1990 (Lei Orgânica da Saúde) — disposições sobre as condições para a promoção, proteção e recuperação da saúde.');
+      dispositivos.push('• Lei nº 8.142/1990 — participação da comunidade na gestão do SUS.');
+    }
+
+    // Educação
+    if (texto.includes('educação') || texto.includes('educacao') || texto.includes('escola') || texto.includes('ensino') || texto.includes('aluno') || texto.includes('estudante') || texto.includes('professor') || texto.includes('creche') || texto.includes('infantil')) {
+      dispositivos.push('• Art. 205 da CF/88 — "A educação, direito de todos e dever do Estado e da família."');
+      dispositivos.push('• Art. 208 da CF/88 — garantia de educação básica obrigatória e gratuita.');
+      dispositivos.push('• Art. 211, §2º da CF/88 — atuação prioritária dos Municípios no ensino fundamental e educação infantil.');
+      dispositivos.push('• Lei nº 9.394/1996 (LDB) — Diretrizes e Bases da Educação Nacional.');
+    }
+
+    // Meio ambiente / Resíduos / Coleta
+    if (texto.includes('meio ambiente') || texto.includes('ambiental') || texto.includes('lixo') || texto.includes('resíduo') || texto.includes('coleta') || texto.includes('reciclagem') || texto.includes('seletiva') || texto.includes('poluição') || texto.includes('desmatamento') || texto.includes('florestal')) {
+      dispositivos.push('• Art. 225 da CF/88 — "Todos têm direito ao meio ambiente ecologicamente equilibrado, bem de uso comum do povo."');
+      dispositivos.push('• Art. 23, incisos VI e VII da CF/88 — competência comum para proteger o meio ambiente e combater a poluição.');
+      dispositivos.push('• Lei nº 12.305/2010 (Política Nacional de Resíduos Sólidos — PNRS) — responsabilidade compartilhada pelo ciclo de vida dos produtos.');
+    }
+
+    // Transporte / Trânsito / Mobilidade
+    if (texto.includes('transporte') || texto.includes('trânsito') || texto.includes('transito') || texto.includes('ônibus') || texto.includes('mobilidade') || texto.includes('ciclovia') || texto.includes('estacionamento') || texto.includes('táxi') || texto.includes('escolar')) {
+      dispositivos.push('• Art. 30, inciso V da CF/88 — competência municipal para organizar e prestar os serviços públicos de interesse local, incluído o de transporte coletivo.');
+      dispositivos.push('• Lei nº 12.587/2012 (Política Nacional de Mobilidade Urbana).');
+    }
+
+    // Assistência Social / Criança / Idoso / PcD
+    if (texto.includes('assistência social') || texto.includes('assistencia') || texto.includes('criança') || texto.includes('adolescente') || texto.includes('idoso') || texto.includes('deficiência') || texto.includes('deficiente') || texto.includes('vulnerabilidade') || texto.includes('cras') || texto.includes('creas')) {
+      dispositivos.push('• Art. 203 da CF/88 — "A assistência social será prestada a quem dela necessitar, independentemente de contribuição à seguridade social."');
+      dispositivos.push('• Lei nº 8.742/1993 (LOAS) — Lei Orgânica da Assistência Social.');
+      if (texto.includes('criança') || texto.includes('adolescente')) {
+        dispositivos.push('• Lei nº 8.069/1990 (ECA) — Estatuto da Criança e do Adolescente.');
+      }
+      if (texto.includes('idoso')) {
+        dispositivos.push('• Lei nº 10.741/2003 — Estatuto da Pessoa Idosa.');
+      }
+      if (texto.includes('deficiência') || texto.includes('deficiente') || texto.includes('acessibilidade')) {
+        dispositivos.push('• Lei nº 13.146/2015 — Estatuto da Pessoa com Deficiência (Lei Brasileira de Inclusão).');
+      }
+    }
+
+    // Segurança Pública
+    if (texto.includes('segurança') || texto.includes('seguranca') || texto.includes('guarda municipal') || texto.includes('vigilância') || texto.includes('iluminação') || texto.includes('câmera')) {
+      dispositivos.push('• Art. 144 da CF/88 — "A segurança pública, dever do Estado, direito e responsabilidade de todos."');
+      dispositivos.push('• Art. 144, §8º da CF/88 — os Municípios poderão constituir guardas municipais.');
+    }
+
+    // Urbanismo / Planejamento / Obras
+    if (texto.includes('urbanismo') || texto.includes('zoneamento') || texto.includes('construção') || texto.includes('obra') || texto.includes('plano diretor') || texto.includes('parcelamento') || texto.includes('uso do solo') || texto.includes('edificação')) {
+      dispositivos.push('• Art. 182 da CF/88 — política de desenvolvimento urbano, plano diretor obrigatório.');
+      dispositivos.push('• Lei nº 10.257/2001 (Estatuto da Cidade) — diretrizes gerais da política urbana.');
+    }
+
+    // Licitações / Contratos / Administração
+    if (texto.includes('licitação') || texto.includes('licitacao') || texto.includes('contrato') || texto.includes('compra') || texto.includes('pregão') || texto.includes('pregao')) {
+      dispositivos.push('• Lei nº 14.133/2021 (Nova Lei de Licitações e Contratos Administrativos).');
+      dispositivos.push('• Art. 37, inciso XXI da CF/88 — obrigatoriedade de licitação para obras, serviços, compras e alienações.');
+    }
+
+    // Tributos / Impostos / Taxas
+    if (texto.includes('tributo') || texto.includes('imposto') || texto.includes('taxa') || texto.includes('iptu') || texto.includes('iss') || texto.includes('itbi') || texto.includes('contribuição') || texto.includes('fiscal')) {
+      dispositivos.push('• Art. 156 da CF/88 — competência dos Municípios para instituir IPTU, ITBI e ISS.');
+      dispositivos.push('• Lei nº 5.172/1966 (CTN) — Código Tributário Nacional.');
+      dispositivos.push('• Lei Complementar nº 101/2000 (LRF) — responsabilidade na gestão fiscal.');
+    }
+
+    // Servidores / Funcionalismo
+    if (texto.includes('servidor') || texto.includes('funcionário') || texto.includes('funcionario') || texto.includes('cargo') || texto.includes('concurso') || texto.includes('vencimento') || texto.includes('salário') || texto.includes('gratificação')) {
+      dispositivos.push('• Art. 39 da CF/88 — regime jurídico dos servidores públicos.');
+      dispositivos.push('• Art. 37, incisos I a VI da CF/88 — regras de acessibilidade a cargos, empregos e funções públicas.');
+    }
+
+    // Cultura / Esporte / Lazer
+    if (texto.includes('cultura') || texto.includes('esporte') || texto.includes('lazer') || texto.includes('patrimônio cultural') || texto.includes('evento') || texto.includes('festival')) {
+      dispositivos.push('• Art. 215 da CF/88 — "O Estado garantirá a todos o pleno exercício dos direitos culturais."');
+      dispositivos.push('• Art. 217 da CF/88 — dever do Estado de fomentar práticas desportivas.');
+    }
+
+    // Proteção de Dados / LGPD
+    if (texto.includes('dado') || texto.includes('privacidade') || texto.includes('lgpd') || texto.includes('proteção de dados') || texto.includes('informação pessoal')) {
+      dispositivos.push('• Art. 5º, inciso LXXIX da CF/88 — proteção de dados pessoais como direito fundamental.');
+      dispositivos.push('• Lei nº 13.709/2018 (LGPD) — Lei Geral de Proteção de Dados Pessoais.');
+    }
+
+    // Transparência / Acesso à informação
+    if (texto.includes('transparência') || texto.includes('transparencia') || texto.includes('acesso à informação') || texto.includes('portal') || texto.includes('publicidade')) {
+      dispositivos.push('• Art. 5º, inciso XXXIII da CF/88 — direito de receber dos órgãos públicos informações de seu interesse particular.');
+      dispositivos.push('• Lei nº 12.527/2011 (LAI) — Lei de Acesso à Informação.');
+    }
+
+    // Sempre inclui a Lei Orgânica como referência final
+    dispositivos.push('• Lei Orgânica do Município — competências legislativas e administrativas locais.');
+
+    return dispositivos.join('\n');
+  };
+
   const isPromptVague = (text: string) => {
     const clean = text.toLowerCase().trim();
     if (clean.length < 25) return true;
@@ -424,7 +617,8 @@ export const NewDocument: React.FC = () => {
       'gerar um convite', 'gerar convite', 'criar um convite', 'fazer um convite', 'um convite', 'criar convite', 'convite',
       'gerar um ofício', 'gerar oficio', 'criar um oficio', 'fazer um oficio', 'um oficio', 'criar oficio', 'ofício', 'oficio',
       'gerar um memorando', 'gerar memorando', 'criar um memorando', 'fazer um memorando', 'um memorando', 'memorando',
-      'gerar um decreto', 'gerar decreto', 'criar um decreto', 'fazer um decreto', 'um decreto', 'decreto'
+      'gerar um decreto', 'gerar decreto', 'criar um decreto', 'fazer um decreto', 'um decreto', 'decreto',
+      'gerar um projeto de lei', 'gerar projeto de lei', 'criar um projeto de lei', 'fazer um projeto de lei', 'um projeto de lei', 'criar projeto de lei', 'projeto de lei', 'pl', 'gerar pl', 'criar pl'
     ];
     if (vaguePhrases.some(p => clean === p || clean === p + '.')) {
       return true;
@@ -485,7 +679,155 @@ export const NewDocument: React.FC = () => {
       const newCtxData = { ...chatFlow.data };
       const userName = profile?.name?.split(' ')[0] || 'Guilherme';
       
-      if (docTypeFlow === 'convite') {
+      if (docTypeFlow === 'projeto_lei') {
+        // === FLUXO GUIADO DE PROJETO DE LEI ===
+        if (step === 1) {
+          // Validação constitucional antes de aceitar o tema
+          const validacao = validateConstitutionality(userText);
+          if (validacao.isUnconstitutional) {
+            setTimeout(() => {
+              setChatMessages(prev => [
+                ...prev,
+                {
+                  sender: 'ia',
+                  text: `⚠️ **Alerta de Inconstitucionalidade Detectado**\n\n${validacao.alert}`,
+                  timestamp: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
+                },
+                {
+                  sender: 'ia',
+                  text: `📜 **Fundamentação Legal (Base Nacional de Conhecimento):**\n\n${validacao.fundamentacao}\n\n---\n\n🔄 Por favor, **reformule o tema** do Projeto de Lei respeitando os limites constitucionais.`,
+                  timestamp: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
+                }
+              ]);
+              setIsChatTyping(false);
+            }, 800);
+            // Permanece no step 1 para aguardar novo tema
+            return;
+          }
+
+          newCtxData.tema = userText;
+          setChatFlow(prev => ({ ...prev, step: 2, data: newCtxData }));
+          
+          setTimeout(() => {
+            setChatMessages(prev => [
+              ...prev,
+              {
+                sender: 'ia',
+                text: `📋 Excelente, ${userName}! O tema do Projeto de Lei será: **"${userText}"**.`,
+                timestamp: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
+              },
+              {
+                sender: 'ia',
+                text: `Agora preciso que você descreva a **Justificativa** do Projeto de Lei.\n\nExplique o contexto, o problema a ser resolvido e o impacto social esperado.\n(Ex: "A cidade possui X problema que afeta a população Y, sendo necessário Z para resolver...")`,
+                timestamp: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
+              }
+            ]);
+            setIsChatTyping(false);
+          }, 800);
+          return;
+        } else if (step === 2) {
+          newCtxData.justificativa = userText;
+          
+          // BUSCA AUTOMÁTICA DE FUNDAMENTAÇÃO LEGAL na Base Nacional de Conhecimento
+          const fundamentacaoAuto = getAutoFundamentacao(newCtxData.tema || '', userText);
+          newCtxData.fundamentacao = fundamentacaoAuto;
+          
+          setChatFlow(prev => ({ ...prev, step: 3, data: newCtxData }));
+          
+          setTimeout(() => {
+            setChatMessages(prev => [
+              ...prev,
+              {
+                sender: 'ia',
+                text: `⚖️ Justificativa registrada! Consultei a **Base Nacional de Conhecimento** e identifiquei os seguintes dispositivos legais aplicáveis:`,
+                timestamp: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
+              },
+              {
+                sender: 'ia',
+                text: `📜 **Fundamentação Legal (gerada automaticamente):**\n\n${fundamentacaoAuto}\n\n---\n\n**Etapa 3 de 4 — Artigos e Disposições**\n\nAgora descreva o **conteúdo** que o Projeto de Lei deve regulamentar.\n\nDescreva o que cada artigo deve tratar — eu estruturo automaticamente.\n(Ex: "Criar programa de coleta seletiva, obrigar separação do lixo, multa para quem descumprir")`,
+                timestamp: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
+              }
+            ]);
+            setIsChatTyping(false);
+          }, 800);
+          return;
+        } else if (step === 3) {
+          newCtxData.artigos = userText;
+          setChatFlow(prev => ({ ...prev, step: 4, data: newCtxData }));
+          
+          setTimeout(() => {
+            setChatMessages(prev => [
+              ...prev,
+              {
+                sender: 'ia',
+                text: `✅ Conteúdo normativo registrado! Estamos na última etapa.`,
+                timestamp: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
+              },
+              {
+                sender: 'ia',
+                text: `**Etapa 4 de 4 — Disposições Finais**\n\nHá alguma **Disposição Final** específica que deva constar?\n\n(Ex: data de vigência, revogação de normas anteriores, vacatio legis, prazo de regulamentação)\n\n💡 *Se não houver, digite "padrão" e eu incluirei as disposições finais comuns.*`,
+                timestamp: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
+              }
+            ]);
+            setIsChatTyping(false);
+          }, 800);
+          return;
+        } else if (step === 4) {
+          const isPadrao = userText.toLowerCase().includes('padrão') || userText.toLowerCase().includes('padrao') || userText.toLowerCase().includes('não') || userText.toLowerCase().includes('nao');
+          newCtxData.disposicoes = isPadrao 
+            ? 'Esta Lei entra em vigor na data de sua publicação, revogadas as disposições em contrário.'
+            : userText;
+          setChatFlow({ isActive: false, docType: 'geral', step: 0, data: {} });
+          
+          const finalPrompt = `Gerar um Projeto de Lei Municipal completo e formal sobre o tema: "${newCtxData.tema}".\n\nJustificativa: "${newCtxData.justificativa}".\n\nFundamentação Legal: "${newCtxData.fundamentacao}".\n\nArtigos e Disposições Normativas: "${newCtxData.artigos}".\n\nDisposições Finais: "${newCtxData.disposicoes}".\n\nO documento deve seguir a estrutura de redação legislativa do Manual de Redação da Presidência da República, com ementa, preâmbulo, artigos numerados, parágrafos, incisos e justificativa técnica ao final.`;
+          
+          setIsGenerating(true);
+          
+          const startGeneration = async () => {
+            try {
+              const { data } = await api.post('/documents/generate-ia', {
+                type: 'PROJETO_LEI',
+                prompt: finalPrompt,
+                municipalityName: profile?.municipality?.name,
+                secretariatName: profile?.secretariat?.name,
+              });
+              setGeneratedContent(data.content);
+              setOriginalGeneratedContent(data.content);
+              extractAndSaveEntities(data.content);
+              setAppliedInstructions([]);
+              
+              setChatMessages(prev => [...prev, {
+                sender: 'ia',
+                text: `✨ Projeto de Lei elaborado com sucesso, ${userName}! O documento foi estruturado conforme as normas de técnica legislativa e fundamentado na Base Nacional de Conhecimento. Revise o texto ao lado e solicite ajustes se necessário!`,
+                timestamp: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
+              }]);
+            } catch (err) {
+              console.error(err);
+              const year = new Date().getFullYear();
+              const munNameNormalized = profile?.municipality?.name || 'Nova Friburgo';
+              
+              const plFallback = `MUNICÍPIO DE ${munNameNormalized.toUpperCase()}\nCÂMARA MUNICIPAL\n\nPROJETO DE LEI Nº ___/${year}\n\nEmenta: ${newCtxData.tema}.\n\nO PREFEITO MUNICIPAL DE ${munNameNormalized.toUpperCase()}, no uso das atribuições que lhe confere a Lei Orgânica do Município,\n\nFaz saber que a Câmara Municipal aprovou e ele sanciona a seguinte Lei:\n\n${newCtxData.artigos}\n\n${newCtxData.disposicoes}\n\n${munNameNormalized}, ___ de _____________ de ${year}.\n\n\n\n__________________________________\nPrefeito Municipal\n\n\nJUSTIFICATIVA\n\nSenhores Vereadores,\n\n${newCtxData.justificativa}\n\nFundamentação Legal: ${newCtxData.fundamentacao}\n\nDiante do exposto, submeto o presente Projeto de Lei à apreciação desta Casa Legislativa, confiante de que os nobres Vereadores reconhecerão a relevância e a urgência da matéria.\n\nRespeitosamente,\n\n\n__________________________________\nPrefeito Municipal`;
+              
+              setGeneratedContent(plFallback);
+              setOriginalGeneratedContent(plFallback);
+              extractAndSaveEntities(plFallback);
+              setAppliedInstructions([]);
+              
+              setChatMessages(prev => [...prev, {
+                sender: 'ia',
+                text: `✨ Projeto de Lei elaborado, ${userName}! Estruturei o documento com ementa, preâmbulo, artigos e justificativa técnica. Revise ao lado e me peça qualquer ajuste!`,
+                timestamp: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
+              }]);
+            } finally {
+              setIsGenerating(false);
+              setIsChatTyping(false);
+            }
+          };
+          
+          startGeneration();
+          return;
+        }
+      } else if (docTypeFlow === 'convite') {
         if (step === 1) {
           newCtxData.tema = userText;
           setChatFlow(prev => ({ ...prev, step: 2, data: newCtxData }));
@@ -610,7 +952,7 @@ export const NewDocument: React.FC = () => {
             } catch (err) {
               console.error(err);
               const year = new Date().getFullYear();
-              const typeLabel = docType === 'OFICIO' ? 'OFÍCIO CIRCULAR' : docType === 'MEMORANDO' ? 'MEMORANDO INTERNO' : docType === 'RESPOSTA_OFICIO' ? 'RESPOSTA A OFÍCIO' : 'DECRETO MUNICIPAL';
+              const typeLabel = docType === 'OFICIO' ? 'OFÍCIO CIRCULAR' : docType === 'MEMORANDO' ? 'MEMORANDO INTERNO' : docType === 'RESPOSTA_OFICIO' ? 'RESPOSTA A OFÍCIO' : docType === 'PROJETO_LEI' ? 'PROJETO DE LEI' : 'DECRETO MUNICIPAL';
               const munNameNormalized = profile?.municipality?.name || 'Nova Friburgo';
               const secNameNormalized = profile?.secretariat?.name || 'Secretaria Municipal de Administração';
               
@@ -685,7 +1027,7 @@ export const NewDocument: React.FC = () => {
           newCtxData.dataHora = userText;
           setChatFlow({ isActive: false, docType: 'geral', step: 0, data: {} });
           
-          const finalPrompt = `Gerar um ${docType === 'OFICIO' ? 'ofício' : docType === 'MEMORANDO' ? 'memorando' : docType === 'DECRETO' ? 'decreto' : 'documento'} oficial com o objetivo: "${newCtxData.tema}". Destinatário: "${newCtxData.autoridades}". Prazos e detalhes adicionais: "${userText}".`;
+          const finalPrompt = `Gerar um ${docType === 'OFICIO' ? 'ofício' : docType === 'MEMORANDO' ? 'memorando' : docType === 'DECRETO' ? 'decreto' : docType === 'PROJETO_LEI' ? 'projeto de lei' : 'documento'} oficial com o objetivo: "${newCtxData.tema}". Destinatário: "${newCtxData.autoridades}". Prazos e detalhes adicionais: "${userText}".`;
           
           setIsGenerating(true);
           
@@ -710,7 +1052,7 @@ export const NewDocument: React.FC = () => {
             } catch (err) {
               console.error(err);
               const year = new Date().getFullYear();
-              const typeLabel = docType === 'OFICIO' ? 'OFÍCIO CIRCULAR' : docType === 'MEMORANDO' ? 'MEMORANDO INTERNO' : docType === 'RESPOSTA_OFICIO' ? 'RESPOSTA A OFÍCIO' : 'DECRETO MUNICIPAL';
+              const typeLabel = docType === 'OFICIO' ? 'OFÍCIO CIRCULAR' : docType === 'MEMORANDO' ? 'MEMORANDO INTERNO' : docType === 'RESPOSTA_OFICIO' ? 'RESPOSTA A OFÍCIO' : docType === 'PROJETO_LEI' ? 'PROJETO DE LEI' : 'DECRETO MUNICIPAL';
               const munNameNormalized = profile?.municipality?.name || 'Nova Friburgo';
               const secNameNormalized = profile?.secretariat?.name || 'Secretaria Municipal de Administração';
               
@@ -743,6 +1085,30 @@ export const NewDocument: React.FC = () => {
     // 1. Caso haja geração inicial pendente de informações
     if (!generatedContent && pendingPrompt) {
       const lowerInput = userText.toLowerCase();
+      
+      // GUARDA CONSTITUCIONAL: Valida o conteúdo antes de gerar qualquer documento
+      const validacaoPending = validateConstitutionality(pendingPrompt + ' ' + userText);
+      if (validacaoPending.isUnconstitutional) {
+        setPendingPrompt(null);
+        setTimeout(() => {
+          setChatMessages(prev => [
+            ...prev,
+            {
+              sender: 'ia',
+              text: `⚠️ **Alerta de Inconstitucionalidade Detectado**\n\n${validacaoPending.alert}`,
+              timestamp: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
+            },
+            {
+              sender: 'ia',
+              text: `📜 **Fundamentação Legal (Base Nacional de Conhecimento):**\n\n${validacaoPending.fundamentacao}\n\n---\n\n❌ O documento **não pode ser gerado** por violar normas constitucionais. Reformule sua solicitação respeitando os limites legais.`,
+              timestamp: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
+            }
+          ]);
+          setIsChatTyping(false);
+        }, 800);
+        return;
+      }
+      
       const skipKeywords = ['prosseguir', 'gerar assim mesmo', 'gerar sem preencher', 'pode gerar', 'gerar', 'pular'];
       const shouldSkip = skipKeywords.some(keyword => lowerInput.includes(keyword));
 
@@ -789,7 +1155,9 @@ export const NewDocument: React.FC = () => {
                 ? 'MEMORANDO INTERNO'
                 : docType === 'RESPOSTA_OFICIO'
                   ? 'RESPOSTA A OFÍCIO'
-                  : 'DECRETO MUNICIPAL';
+                  : docType === 'PROJETO_LEI'
+                    ? 'PROJETO DE LEI'
+                    : 'DECRETO MUNICIPAL';
           const munNameNormalized = docType === 'RESPOSTA_OFICIO' ? 'São José do Goiabal' : (profile?.municipality?.name || 'Nova Friburgo');
           const secNameNormalized = profile?.secretariat?.name || 'Secretaria Municipal de Administração';
 
@@ -868,10 +1236,138 @@ export const NewDocument: React.FC = () => {
         }
       }
 
-      // A. Verifica se o prompt inicial é muito vago ou impreciso e inicia fluxo por etapas individualizadas
+      // GUARDA CONSTITUCIONAL GLOBAL: Intercepta temas inconstitucionais em QUALQUER tipo de documento
+      const validacaoGlobal = validateConstitutionality(userText);
+      if (validacaoGlobal.isUnconstitutional) {
+        setTimeout(() => {
+          setChatMessages(prev => [
+            ...prev,
+            {
+              sender: 'ia',
+              text: `⚠️ **Alerta de Inconstitucionalidade Detectado**\n\n${validacaoGlobal.alert}`,
+              timestamp: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
+            },
+            {
+              sender: 'ia',
+              text: `📜 **Fundamentação Legal (Base Nacional de Conhecimento):**\n\n${validacaoGlobal.fundamentacao}\n\n---\n\n❌ O documento **não pode ser gerado** por violar normas constitucionais. Reformule sua solicitação respeitando os limites legais.`,
+              timestamp: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
+            }
+          ]);
+          setIsChatTyping(false);
+        }, 800);
+        return;
+      }
+
+      // DETECÇÃO INTELIGENTE: Se o usuário menciona "lei" ou "projeto de lei" em qualquer tipo de documento, redireciona para o fluxo de PL
+      const lowerUserText = userText.toLowerCase();
+      const isRequestingLei = (
+        lowerUserText.includes('criar uma lei') ||
+        lowerUserText.includes('fazer uma lei') ||
+        lowerUserText.includes('criar lei') ||
+        lowerUserText.includes('nova lei') ||
+        lowerUserText.includes('projeto de lei') ||
+        lowerUserText.includes('fazer lei') ||
+        lowerUserText.includes('quero uma lei') ||
+        lowerUserText.includes('elaborar lei') ||
+        lowerUserText.includes('redigir lei') ||
+        lowerUserText.includes('instituir lei')
+      );
+      if (isRequestingLei && docType !== 'PROJETO_LEI') {
+        // Redireciona automaticamente para o fluxo de Projeto de Lei
+        setChatFlow({
+          isActive: true,
+          docType: 'projeto_lei',
+          step: 2,
+          data: { tema: userText }
+        });
+        
+        setTimeout(() => {
+          setChatMessages(prev => [
+            ...prev,
+            {
+              sender: 'ia',
+              text: `🔄 Detectei que você deseja **criar uma Lei**. Vou redirecionar automaticamente para o fluxo especializado de **Projeto de Lei**, que segue as normas de técnica legislativa e a Base Nacional de Conhecimento.\n\n✅ **Tema registrado:** "${userText}"`,
+              timestamp: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
+            },
+            {
+              sender: 'ia',
+              text: `**Etapa 2 de 5 — Justificativa**\n\nAgora preciso que você descreva a **Justificativa** do Projeto de Lei.\n\nExplique o contexto, o problema a ser resolvido e o impacto social esperado.\n(Ex: "A cidade possui X problema que afeta a população Y, sendo necessário Z para resolver...")`,
+              timestamp: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
+            }
+          ]);
+          setIsChatTyping(false);
+        }, 800);
+        return;
+      }
+
+      // A. Para PROJETO_LEI: SEMPRE ativa o fluxo guiado especializado, independente do tamanho do prompt
+      if (docType === 'PROJETO_LEI') {
+        const temaInicial = userText;
+        
+        // Validação Constitucional contra a Base Nacional de Conhecimento
+        const validacaoConstitucional = validateConstitutionality(temaInicial);
+        
+        if (validacaoConstitucional.isUnconstitutional) {
+          setTimeout(() => {
+            setChatMessages(prev => [
+              ...prev,
+              {
+                sender: 'ia',
+                text: `⚠️ **Alerta de Inconstitucionalidade Detectado**\n\n${validacaoConstitucional.alert}`,
+                timestamp: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
+              },
+              {
+                sender: 'ia',
+                text: `📜 **Fundamentação Legal (Base Nacional de Conhecimento):**\n\n${validacaoConstitucional.fundamentacao}\n\n---\n\n🔄 Deseja **reformular o tema** do Projeto de Lei respeitando os limites constitucionais? Se sim, descreva o novo tema abaixo.`,
+                timestamp: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
+              }
+            ]);
+            setIsChatTyping(false);
+          }, 800);
+
+          // Ativa o fluxo de PL em step=1 para aguardar novo tema
+          setChatFlow({
+            isActive: true,
+            docType: 'projeto_lei',
+            step: 1,
+            data: {}
+          });
+          return;
+        }
+
+        // Tema é constitucional — inicia o fluxo guiado no step 2 (justificativa)
+        setChatFlow({
+          isActive: true,
+          docType: 'projeto_lei',
+          step: 2,
+          data: { tema: temaInicial }
+        });
+
+        setTimeout(() => {
+          setChatMessages(prev => [
+            ...prev,
+            {
+              sender: 'ia',
+              text: `📜 Perfeito! Vou te guiar na elaboração do **Projeto de Lei** seguindo as normas de técnica legislativa e a Base Nacional de Conhecimento Jurídico.\n\n✅ **Tema registrado:** "${temaInicial}"`,
+              timestamp: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
+            },
+            {
+              sender: 'ia',
+              text: `**Etapa 2 de 5 — Justificativa**\n\nAgora preciso que você descreva a **Justificativa** do Projeto de Lei.\n\nExplique o contexto, o problema a ser resolvido e o impacto social esperado.\n(Ex: "A cidade possui X problema que afeta a população Y, sendo necessário Z para resolver...")`,
+              timestamp: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
+            }
+          ]);
+          setIsChatTyping(false);
+        }, 800);
+        return;
+      }
+
+      // B. Verifica se o prompt inicial é muito vago ou impreciso e inicia fluxo por etapas individualizadas
       if (isPromptVague(userText)) {
-        const isConvite = userText.toLowerCase().includes('convite');
-        const flowType = isConvite ? 'convite' : 'geral';
+        const lowerInput = userText.toLowerCase();
+        const isConvite = lowerInput.includes('convite');
+        const isProjetoLei = lowerInput.includes('projeto de lei') || lowerInput.includes('pl') || (docType === 'PROJETO_LEI');
+        const flowType = isProjetoLei ? 'projeto_lei' : isConvite ? 'convite' : 'geral';
         
         setChatFlow({
           isActive: true,
@@ -881,7 +1377,21 @@ export const NewDocument: React.FC = () => {
         });
 
         setTimeout(() => {
-          if (flowType === 'convite') {
+          if (flowType === 'projeto_lei') {
+            setChatMessages(prev => [
+              ...prev,
+              {
+                sender: 'ia',
+                text: '📜 Perfeito! Vou te guiar na elaboração do **Projeto de Lei** seguindo as normas de técnica legislativa e a Base Nacional de Conhecimento Jurídico.',
+                timestamp: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
+              },
+              {
+                sender: 'ia',
+                text: `**Etapa 1 de 5 — Tema e Ementa**\n\nQual é o **Tema** ou **Assunto** do Projeto de Lei?\n(Ex: "Instituir o Programa Municipal de Coleta Seletiva", "Regulamentar o uso de transporte escolar")`,
+                timestamp: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
+              }
+            ]);
+          } else if (flowType === 'convite') {
             const sugEventos = learnedContext.eventos.slice(-2).join(', ');
             setChatMessages(prev => [
               ...prev,
@@ -917,7 +1427,7 @@ export const NewDocument: React.FC = () => {
         return;
       }
 
-      // B. Validação complementar de itens obrigatórios
+      // C. Validação complementar de itens obrigatórios (apenas para tipos que NÃO são Projeto de Lei)
       const missing = verifyPromptDetails(userText);
       if (missing.length > 0) {
         setPendingPrompt(userText);
@@ -986,7 +1496,9 @@ export const NewDocument: React.FC = () => {
                 ? 'MEMORANDO INTERNO'
                 : docType === 'RESPOSTA_OFICIO'
                   ? 'RESPOSTA A OFÍCIO'
-                  : 'DECRETO MUNICIPAL';
+                  : docType === 'PROJETO_LEI'
+                    ? 'PROJETO DE LEI'
+                    : 'DECRETO MUNICIPAL';
           const munNameNormalized = docType === 'RESPOSTA_OFICIO' ? 'São José do Goiabal' : (profile?.municipality?.name || 'Nova Friburgo');
           const secNameNormalized = profile?.secretariat?.name || 'Secretaria Municipal de Administração';
 
@@ -1136,7 +1648,7 @@ export const NewDocument: React.FC = () => {
       setChatMessages([
         {
           sender: 'ia',
-          text: `Olá! Sou seu assistente de redação oficial. Para começarmos a redigir o seu ${docType === 'OFICIO' ? 'Ofício' : docType === 'MEMORANDO' ? 'Memorando' : docType === 'DECRETO' ? 'Decreto' : 'Ofício de Resposta'
+          text: `Olá! Sou seu assistente de redação oficial. Para começarmos a redigir o seu ${docType === 'OFICIO' ? 'Ofício' : docType === 'MEMORANDO' ? 'Memorando' : docType === 'DECRETO' ? 'Decreto' : docType === 'PROJETO_LEI' ? 'Projeto de Lei' : 'Ofício de Resposta'
             }, digite abaixo o que deseja que eu escreva (ex: tema, finalidade, prazos) ou anexe um documento de apoio acima.`,
           timestamp: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
         }
@@ -1228,6 +1740,12 @@ export const NewDocument: React.FC = () => {
       description: 'Gere uma resposta formal analisando o ofício recebido',
       icon: <Scale size={16} />,
     },
+    {
+      value: 'PROJETO_LEI',
+      label: 'Projeto de Lei',
+      description: 'Proposição legislativa municipal com justificativa técnica',
+      icon: <ScrollText size={16} />,
+    },
   ];
 
   useEffect(() => {
@@ -1240,7 +1758,9 @@ export const NewDocument: React.FC = () => {
             ? 'Memorando'
             : docType === 'RESPOSTA_OFICIO'
               ? 'Resposta a Ofício'
-              : 'Decreto Municipal';
+              : docType === 'PROJETO_LEI'
+                ? 'Projeto de Lei'
+                : 'Decreto Municipal';
       setTitle(`${typeLabel} nº .../${new Date().getFullYear()}`);
     }
 

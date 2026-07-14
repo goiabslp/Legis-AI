@@ -264,6 +264,8 @@ export class KnowledgeService implements OnModuleInit {
         priorityBonus = 0.04; // Prioridade 7: CGU
       } else if (cat.includes('redação oficial') || cat.includes('manuais') || cat.includes('licitações')) {
         priorityBonus = 0.02; // Prioridade 8: Manuais Técnicos e Oficiais
+      } else if (cat.includes('projeto de lei')) {
+        priorityBonus = 0.16; // Proposições legislativas (entre Leis Federais e Decretos)
       }
 
       // O score final combina a similaridade base com o bônus de prioridade ponderado
