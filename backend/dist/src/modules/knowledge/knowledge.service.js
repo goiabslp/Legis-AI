@@ -38,17 +38,29 @@ var __importStar = (this && this.__importStar) || (function () {
         return result;
     };
 })();
+var __metadata = (this && this.__metadata) || function (k, v) {
+    if (typeof Reflect === "object" && typeof Reflect.metadata === "function") return Reflect.metadata(k, v);
+};
+var KnowledgeService_1;
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.KnowledgeService = void 0;
 const common_1 = require("@nestjs/common");
 const fs = __importStar(require("fs"));
 const path = __importStar(require("path"));
 const pdf = __importStar(require("pdf-parse"));
-let KnowledgeService = class KnowledgeService {
+const prisma_service_1 = require("../../infra/database/prisma.service");
+const supabase_service_1 = require("../../infra/supabase/supabase.service");
+let KnowledgeService = KnowledgeService_1 = class KnowledgeService {
+    prisma;
+    supabaseService;
+    logger = new common_1.Logger(KnowledgeService_1.name);
     rootPath = path.join(process.cwd().endsWith('backend') ? path.resolve(process.cwd(), '..') : process.cwd(), 'Conhecimento');
-    storePath = path.join(this.rootPath, 'vector-store.json');
     vectorDimensions = 384;
-    onModuleInit() {
+    constructor(prisma, supabaseService) {
+        this.prisma = prisma;
+        this.supabaseService = supabaseService;
+    }
+    async onModuleInit() {
         const folders = [
             'Constituição',
             'Administração Pública',
@@ -62,6 +74,8 @@ let KnowledgeService = class KnowledgeService {
             'Meio Ambiente',
             'Eleitoral',
             'Redação Oficial',
+            'Base Municipal',
+            'Base do Usuário'
         ];
         if (!fs.existsSync(this.rootPath)) {
             fs.mkdirSync(this.rootPath, { recursive: true });
@@ -72,8 +86,54 @@ let KnowledgeService = class KnowledgeService {
                 fs.mkdirSync(folderPath, { recursive: true });
             }
         });
-        if (!fs.existsSync(this.storePath)) {
-            fs.writeFileSync(this.storePath, JSON.stringify([]));
+        try {
+            const supabase = this.supabaseService.getClient();
+            const { data: buckets, error: listError } = await supabase.storage.listBuckets();
+            if (!listError && buckets) {
+                const exists = buckets.some((b) => b.name === 'knowledge-base');
+                if (!exists) {
+                    const { error: createError } = await supabase.storage.createBucket('knowledge-base', {
+                        public: true,
+                    });
+                    if (createError) {
+                        this.logger.warn(`Não foi possível criar o bucket "knowledge-base": ${createError.message}`);
+                    }
+                    else {
+                        this.logger.log('Bucket "knowledge-base" criado com sucesso no Supabase Storage.');
+                    }
+                }
+                else {
+                    this.logger.log('Bucket "knowledge-base" já existe no Supabase Storage.');
+                }
+            }
+        }
+        catch (e) {
+            this.logger.warn('Modo Demo: Falha ao conectar ao Supabase Storage. Usando armazenamento e processamento local.');
+        }
+    }
+    async uploadToSupabase(fileBuffer, fileName, mimeType, folder) {
+        try {
+            const supabase = this.supabaseService.getClient();
+            const cleanFileName = fileName.replace(/[^a-zA-Z0-9.\-_]/g, '_');
+            const filePath = `${folder}/${Date.now()}_${cleanFileName}`;
+            const { data, error } = await supabase.storage
+                .from('knowledge-base')
+                .upload(filePath, fileBuffer, {
+                contentType: mimeType,
+                upsert: true,
+            });
+            if (error) {
+                this.logger.warn(`Erro no upload Supabase Storage: ${error.message}`);
+                return null;
+            }
+            const { data: publicUrlData } = supabase.storage
+                .from('knowledge-base')
+                .getPublicUrl(filePath);
+            return publicUrlData?.publicUrl || null;
+        }
+        catch (error) {
+            this.logger.warn('Supabase offline ou chaves ausentes. Prosseguindo sem upload em nuvem.');
+            return null;
         }
     }
     generateEmbedding(text) {
@@ -92,110 +152,155 @@ let KnowledgeService = class KnowledgeService {
         const magnitude = Math.sqrt(embedding.reduce((sum, val) => sum + val * val, 0));
         return magnitude > 0 ? embedding.map((val) => val / magnitude) : embedding;
     }
-    cosineSimilarity(vecA, vecB) {
-        let dotProduct = 0;
-        let normA = 0;
-        let normB = 0;
-        for (let i = 0; i < vecA.length; i++) {
-            dotProduct += vecA[i] * vecB[i];
-            normA += vecA[i] * vecA[i];
-            normB += vecB[i] * vecB[i];
+    chunkText(text, title, category, source) {
+        const lines = text.split('\n');
+        const units = [];
+        let currentUnit = '';
+        const articleRegex = /^\s*(Art\.\s*\d+|Artigo\s*\d+)/i;
+        const paragraphRegex = /^\s*(§\s*\d+|Parágrafo\s*único)/i;
+        const clauseRegex = /^\s*([IVXLCDM]+\s*[-–]\s*)/i;
+        const sectionRegex = /^\s*(CAPÍTULO|TÍTULO|SEÇÃO|SECCÃO)\s+[IVXLCDM\d+]/i;
+        lines.forEach((line) => {
+            const trimmedLine = line.trim();
+            if (!trimmedLine)
+                return;
+            if (articleRegex.test(trimmedLine) ||
+                paragraphRegex.test(trimmedLine) ||
+                clauseRegex.test(trimmedLine) ||
+                sectionRegex.test(trimmedLine)) {
+                if (currentUnit.trim()) {
+                    units.push(currentUnit.trim());
+                }
+                currentUnit = line;
+            }
+            else {
+                currentUnit += (currentUnit ? ' ' : '') + line;
+            }
+        });
+        if (currentUnit.trim()) {
+            units.push(currentUnit.trim());
         }
-        return normB && normA ? dotProduct / (Math.sqrt(normA) * Math.sqrt(normB)) : 0;
+        if (units.length <= 1) {
+            const sentences = text.match(/[^.!?]+[.!?]+(\s|$)/g) || [text];
+            let temp = '';
+            sentences.forEach((s) => {
+                if (temp.length + s.length > 800) {
+                    units.push(temp.trim());
+                    temp = s;
+                }
+                else {
+                    temp += s;
+                }
+            });
+            if (temp.trim())
+                units.push(temp.trim());
+        }
+        const chunks = [];
+        let currentChunk = '';
+        let activeArticle = 'Preâmbulo';
+        units.forEach((unit) => {
+            const artMatch = unit.match(/(Art\.\s*\d+|Artigo\s*\d+|CAPÍTULO\s+[IVXLCDM\d+]+|SEÇÃO\s+[IVXLCDM\d+]+)/i);
+            if (artMatch) {
+                activeArticle = artMatch[1];
+            }
+            if (unit.length > 1000) {
+                if (currentChunk.trim()) {
+                    chunks.push({ content: currentChunk.trim(), article: activeArticle });
+                    currentChunk = '';
+                }
+                chunks.push({ content: unit.trim(), article: activeArticle });
+                return;
+            }
+            if (currentChunk.length + unit.length > 1000) {
+                if (currentChunk.trim()) {
+                    chunks.push({ content: currentChunk.trim(), article: activeArticle });
+                }
+                currentChunk = unit;
+            }
+            else {
+                currentChunk += (currentChunk ? '\n\n' : '') + unit;
+            }
+        });
+        if (currentChunk.trim()) {
+            chunks.push({ content: currentChunk.trim(), article: activeArticle });
+        }
+        return chunks.map((c, index) => {
+            const headerContext = `[${title}] | Categoria: ${category} | Seção/Artigo: ${c.article}\n\n`;
+            return {
+                id: `${title.replace(/[^a-zA-Z0-9]/g, '_')}-chunk-${index}`,
+                title,
+                category,
+                source,
+                type: category.toUpperCase().includes('CONSTITUIÇÃO') ? 'CONSTITUICAO' : 'LEI',
+                article: c.article,
+                content: headerContext + c.content,
+                metadata: {
+                    original_length: c.content.length,
+                    chunk_index: index,
+                    total_chunks: chunks.length,
+                    article: c.article,
+                },
+            };
+        });
     }
-    async indexFile(filePath, category) {
+    async indexFile(filePath, category, source = 'NACIONAL') {
         if (!fs.existsSync(filePath)) {
             throw new Error(`Arquivo não encontrado: ${filePath}`);
         }
         const dataBuffer = fs.readFileSync(filePath);
         const pdfData = await pdf(dataBuffer);
         const text = pdfData.text;
-        const articleRegex = /(?=Art\.\s*\d+|Artigo\s*\d+)/gi;
-        let chunksText = text.split(articleRegex);
-        if (chunksText.length <= 1) {
-            chunksText = text.match(/[^.!?]+[.!?]+(\s|$)/g) || [text];
-            const groupedChunks = [];
-            let temp = '';
-            chunksText.forEach((c) => {
-                if (temp.length + c.length > 1000) {
-                    groupedChunks.push(temp.trim());
-                    temp = c;
-                }
-                else {
-                    temp += c;
-                }
-            });
-            if (temp.trim())
-                groupedChunks.push(temp.trim());
-            chunksText = groupedChunks;
-        }
         const fileName = path.basename(filePath, path.extname(filePath));
-        const newChunks = [];
-        chunksText.forEach((chunk, index) => {
-            const trimmedChunk = chunk.trim();
-            if (trimmedChunk.length < 30)
-                return;
-            const artMatch = trimmedChunk.match(/^(Art\.\s*\d+|Artigo\s*\d+)/i);
-            const artigoLabel = artMatch ? artMatch[1] : `Seção ${index + 1}`;
-            const cleanWords = trimmedChunk
-                .toLowerCase()
-                .replace(/[^\w\s]/g, '')
-                .split(/\s+/)
-                .filter((w) => w.length > 4 && !this.isStopword(w));
-            const wordCounts = {};
-            cleanWords.forEach((w) => {
-                wordCounts[w] = (wordCounts[w] || 0) + 1;
-            });
-            const sortedWords = Object.keys(wordCounts).sort((a, b) => wordCounts[b] - wordCounts[a]);
-            const keywords = sortedWords.slice(0, 5);
-            const subjects = keywords.map((k) => k.charAt(0).toUpperCase() + k.slice(1));
-            const embedding = this.generateEmbedding(trimmedChunk);
-            newChunks.push({
-                id: `${fileName}-chunk-${index}`,
-                titulo: fileName.replace(/_/g, ' '),
-                artigo: artigoLabel,
-                assunto: subjects.slice(0, 2),
-                palavras_chave: keywords,
-                texto: trimmedChunk,
-                embedding: embedding,
-                categoria: category,
-            });
-        });
-        const currentStore = JSON.parse(fs.readFileSync(this.storePath, 'utf8'));
-        const filteredStore = currentStore.filter((c) => !c.id.startsWith(`${fileName}-`));
-        const updatedStore = [...filteredStore, ...newChunks];
-        fs.writeFileSync(this.storePath, JSON.stringify(updatedStore, null, 2));
+        const title = fileName.replace(/_/g, ' ');
+        const newChunks = this.chunkText(text, title, category, source);
+        for (const chunk of newChunks) {
+            const embedding = this.generateEmbedding(chunk.content);
+            const embeddingString = `[${embedding.join(',')}]`;
+            await this.prisma.$executeRawUnsafe(`DELETE FROM documents WHERE id = $1`, chunk.id);
+            await this.prisma.$executeRawUnsafe(`INSERT INTO documents (id, titulo, categoria, fonte, tipo, numero, artigo, texto, metadata, embedding, data_criacao)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::vector, $11)`, chunk.id, chunk.title, chunk.category, chunk.source, chunk.type, null, chunk.article, chunk.content, JSON.stringify(chunk.metadata), embeddingString, new Date());
+        }
         return newChunks.length;
     }
     async indexAll() {
         const indexedFiles = [];
         let totalChunks = 0;
-        const scanDir = async (dir, category) => {
+        const scanDir = async (dir, category, source) => {
             const items = fs.readdirSync(dir);
             for (const item of items) {
                 const fullPath = path.join(dir, item);
                 const stat = fs.statSync(fullPath);
                 if (stat.isDirectory()) {
-                    await scanDir(fullPath, category || item);
+                    await scanDir(fullPath, category || item, source);
                 }
                 else if (stat.isFile() && path.extname(item).toLowerCase() === '.pdf') {
                     try {
-                        const chunksCount = await this.indexFile(fullPath, category || 'Geral');
+                        const chunksCount = await this.indexFile(fullPath, category || 'Geral', source);
                         indexedFiles.push(item);
                         totalChunks += chunksCount;
                     }
                     catch (e) {
-                        console.error(`Erro ao indexar arquivo: ${fullPath}`, e);
+                        this.logger.error(`Erro ao indexar arquivo: ${fullPath}`, e);
                     }
                 }
             }
         };
-        const items = fs.readdirSync(this.rootPath);
-        for (const item of items) {
-            const fullPath = path.join(this.rootPath, item);
-            const stat = fs.statSync(fullPath);
-            if (stat.isDirectory()) {
-                await scanDir(fullPath, item);
+        if (fs.existsSync(this.rootPath)) {
+            const items = fs.readdirSync(this.rootPath);
+            for (const item of items) {
+                const fullPath = path.join(this.rootPath, item);
+                const stat = fs.statSync(fullPath);
+                if (stat.isDirectory()) {
+                    let source = 'NACIONAL';
+                    const name = item.toLowerCase();
+                    if (name.includes('municipal') || name.includes('prefeitura')) {
+                        source = 'MUNICIPAL';
+                    }
+                    else if (name.includes('usuario') || name.includes('usuário') || name.includes('pessoal')) {
+                        source = 'USUARIO';
+                    }
+                    await scanDir(fullPath, item, source);
+                }
             }
         }
         return {
@@ -206,80 +311,93 @@ let KnowledgeService = class KnowledgeService {
         };
     }
     async search(query, limit = 5) {
-        if (!fs.existsSync(this.storePath)) {
-            return [];
-        }
-        const store = JSON.parse(fs.readFileSync(this.storePath, 'utf8'));
-        if (store.length === 0)
+        if (!query)
             return [];
         const queryEmbedding = this.generateEmbedding(query);
-        const scoredChunks = store.map((chunk) => {
-            const baseSimilarity = this.cosineSimilarity(queryEmbedding, chunk.embedding);
-            let priorityBonus = 0;
-            const cat = chunk.categoria.toLowerCase();
-            if (cat.includes('constituição')) {
-                priorityBonus = 0.25;
-            }
-            else if (cat.includes('administração pública') ||
-                cat.includes('direito civil') ||
-                cat.includes('tributário') ||
-                cat.includes('trabalho') ||
-                cat.includes('saúde') ||
-                cat.includes('educação') ||
-                cat.includes('assistência social') ||
-                cat.includes('meio ambiente') ||
-                cat.includes('eleitoral')) {
-                priorityBonus = 0.18;
-            }
-            else if (cat.includes('decreto')) {
-                priorityBonus = 0.14;
-            }
-            else if (cat.includes('acórdãos tcu') || cat.includes('acordao')) {
-                priorityBonus = 0.11;
-            }
-            else if (cat.includes('jurisprudência') || cat.includes('súmula')) {
-                priorityBonus = 0.08;
-            }
-            else if (cat.includes('agu')) {
-                priorityBonus = 0.06;
-            }
-            else if (cat.includes('cgu') || cat.includes('transparência')) {
-                priorityBonus = 0.04;
-            }
-            else if (cat.includes('redação oficial') || cat.includes('manuais') || cat.includes('licitações')) {
-                priorityBonus = 0.02;
-            }
-            else if (cat.includes('projeto de lei')) {
-                priorityBonus = 0.16;
-            }
-            const finalScore = Math.min(1.0, baseSimilarity + priorityBonus * 0.4);
-            return {
-                titulo: chunk.titulo,
-                artigo: chunk.artigo,
-                assunto: chunk.assunto,
-                palavras_chave: chunk.palavras_chave,
-                texto: chunk.texto,
-                categoria: chunk.categoria,
-                score: finalScore,
-            };
-        });
-        return scoredChunks
-            .sort((a, b) => b.score - a.score)
-            .slice(0, limit);
+        const queryEmbeddingString = `[${queryEmbedding.join(',')}]`;
+        try {
+            const dbResults = await this.prisma.$queryRawUnsafe(`SELECT id, titulo, categoria, fonte, tipo, numero, artigo, texto, metadata, data_criacao,
+                (1 - (embedding <=> $1::vector)) as similarity
+         FROM documents
+         ORDER BY embedding <=> $1::vector ASC
+         LIMIT $2`, queryEmbeddingString, limit * 2);
+            if (!dbResults || dbResults.length === 0)
+                return [];
+            const scoredChunks = dbResults.map((chunk) => {
+                const baseSimilarity = Number(chunk.similarity || 0);
+                let priorityBonus = 0;
+                const cat = (chunk.categoria || '').toLowerCase();
+                const fonte = (chunk.fonte || '').toLowerCase();
+                if (cat.includes('constituição') || cat.includes('fundamentais') || cat.includes('lindb')) {
+                    priorityBonus = 0.25;
+                }
+                else if (fonte === 'nacional' && (cat.includes('administração pública') ||
+                    cat.includes('licitações') ||
+                    cat.includes('lei 14.133') ||
+                    cat.includes('responsabilidade fiscal') ||
+                    cat.includes('lrf') ||
+                    cat.includes('acesso à informação') ||
+                    cat.includes('lgpd') ||
+                    cat.includes('processo administrativo') ||
+                    cat.includes('educação') ||
+                    cat.includes('saúde') ||
+                    cat.includes('direito civil') ||
+                    cat.includes('tributário') ||
+                    cat.includes('trabalho'))) {
+                    priorityBonus = 0.18;
+                }
+                else if (cat.includes('decreto')) {
+                    priorityBonus = 0.14;
+                }
+                else if (cat.includes('acórdão') || cat.includes('acordao') || cat.includes('tcu')) {
+                    priorityBonus = 0.11;
+                }
+                else if (cat.includes('súmula') || cat.includes('sumula') || cat.includes('repetitivos')) {
+                    priorityBonus = 0.08;
+                }
+                else if (cat.includes('agu')) {
+                    priorityBonus = 0.06;
+                }
+                else if (cat.includes('cgu')) {
+                    priorityBonus = 0.04;
+                }
+                else {
+                    priorityBonus = 0.02;
+                }
+                const finalScore = Math.min(1.0, baseSimilarity + priorityBonus * 0.4);
+                return {
+                    id: chunk.id,
+                    titulo: chunk.titulo,
+                    artigo: chunk.artigo || 'Geral',
+                    texto: chunk.texto,
+                    categoria: chunk.categoria,
+                    fonte: chunk.fonte,
+                    score: finalScore,
+                };
+            });
+            return scoredChunks
+                .sort((a, b) => b.score - a.score)
+                .slice(0, limit);
+        }
+        catch (err) {
+            this.logger.error('Erro na busca vetorial pgvector. Verifique a tabela no banco.', err);
+            return [];
+        }
     }
     getFilesStructure() {
         const getStructure = (dir) => {
-            const structure = { name: path.basename(dir), isDirectory: true, children: [] };
+            const name = path.basename(dir);
+            const structure = { name, isDirectory: true, children: [] };
+            if (!fs.existsSync(dir))
+                return structure;
             const items = fs.readdirSync(dir);
             items.forEach((item) => {
-                if (item === 'vector-store.json')
-                    return;
                 const fullPath = path.join(dir, item);
                 const stat = fs.statSync(fullPath);
                 if (stat.isDirectory()) {
                     structure.children.push(getStructure(fullPath));
                 }
-                else {
+                else if (path.extname(item).toLowerCase() === '.pdf') {
                     structure.children.push({
                         name: item,
                         isDirectory: false,
@@ -295,19 +413,11 @@ let KnowledgeService = class KnowledgeService {
     getRootPath() {
         return this.rootPath;
     }
-    isStopword(word) {
-        const stopwords = [
-            'para', 'como', 'uma', 'umas', 'pelo', 'pela', 'pelos', 'pelas', 'com', 'sem', 'sob', 'sobre',
-            'mais', 'menos', 'este', 'esta', 'estes', 'estas', 'aquele', 'aquela', 'aqueles', 'aquelas',
-            'seus', 'suas', 'meus', 'minhas', 'teus', 'tua', 'isso', 'isto', 'aquilo', 'tendo', 'sendo',
-            'forma', 'lei', 'artigo', 'decreto', 'portaria', 'onde', 'quando', 'quem', 'cujo', 'cuja',
-            'art', 'lei', 'leis', 'artigos', 'conforme', 'nos', 'nas', 'dos', 'das', 'uma', 'um'
-        ];
-        return stopwords.includes(word);
-    }
 };
 exports.KnowledgeService = KnowledgeService;
-exports.KnowledgeService = KnowledgeService = __decorate([
-    (0, common_1.Injectable)()
+exports.KnowledgeService = KnowledgeService = KnowledgeService_1 = __decorate([
+    (0, common_1.Injectable)(),
+    __metadata("design:paramtypes", [prisma_service_1.PrismaService,
+        supabase_service_1.SupabaseService])
 ], KnowledgeService);
 //# sourceMappingURL=knowledge.service.js.map

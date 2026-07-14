@@ -49,6 +49,54 @@ export declare class DocumentController {
         templates: number;
         favorites: number;
     }>;
+    findOne(id: string): Promise<{
+        secretariat: {
+            name: string;
+        };
+        histories: ({
+            author: {
+                name: string;
+            };
+        } & {
+            id: string;
+            createdAt: Date;
+            content: string;
+            authorId: string;
+            documentId: string;
+            originalContent: string | null;
+            diff: import("@prisma/client/runtime/client").JsonValue | null;
+        })[];
+        author: {
+            name: string;
+            email: string;
+        };
+    } & {
+        id: string;
+        createdAt: Date;
+        updatedAt: Date;
+        secretariatId: string;
+        title: string;
+        content: string;
+        type: string;
+        status: string;
+        authorId: string;
+    }>;
+    update(id: string, body: {
+        title?: string;
+        content?: string;
+        status?: string;
+        authorId?: string;
+    }): Promise<{
+        id: string;
+        createdAt: Date;
+        updatedAt: Date;
+        secretariatId: string;
+        title: string;
+        content: string;
+        type: string;
+        status: string;
+        authorId: string;
+    }>;
     sign(body: {
         documentId: string;
         signerName: string;

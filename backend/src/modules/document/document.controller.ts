@@ -1,4 +1,4 @@
-import { Controller, Post, Get, Body, Query, Headers } from '@nestjs/common';
+import { Controller, Post, Get, Body, Query, Param, Put } from '@nestjs/common';
 import { DocumentService } from './document.service';
 
 @Controller('documents')
@@ -43,6 +43,25 @@ export class DocumentController {
     const secId = secretariatId || 'sec-default-id';
     const usrId = userId || 'usr-default-id';
     return this.documentService.getStats(secId, usrId);
+  }
+
+  @Get(':id')
+  async findOne(@Param('id') id: string) {
+    return this.documentService.findOne(id);
+  }
+
+  @Put(':id')
+  async update(
+    @Param('id') id: string,
+    @Body() body: { title?: string; content?: string; status?: string; authorId?: string },
+  ) {
+    const authorId = body.authorId || 'usr-default-id';
+    return this.documentService.update(id, {
+      title: body.title,
+      content: body.content,
+      status: body.status,
+      authorId,
+    });
   }
 
   @Post('sign')

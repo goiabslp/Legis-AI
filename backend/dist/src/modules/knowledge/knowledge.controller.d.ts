@@ -9,13 +9,14 @@ export declare class KnowledgeController {
         results: any[];
     }>;
     getFilesStructure(): any;
-    uploadFile(file: any, category: string): Promise<{
+    uploadFile(file: any, category: string, source?: string): Promise<{
         success: boolean;
         message: string;
         filename: any;
         sizeBytes: any;
         path: any;
         category: string;
+        source: string;
         chunksCount: number;
     }>;
 }

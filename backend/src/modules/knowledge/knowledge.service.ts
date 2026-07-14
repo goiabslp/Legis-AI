@@ -1,29 +1,38 @@
-import { Injectable, OnModuleInit } from '@nestjs/common';
+import { Injectable, OnModuleInit, Logger } from '@nestjs/common';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as pdf from 'pdf-parse';
+import { PrismaService } from '../../infra/database/prisma.service';
+import { SupabaseService } from '../../infra/supabase/supabase.service';
 
 interface KnowledgeChunk {
   id: string;
-  titulo: string;
-  artigo: string;
-  assunto: string[];
-  palavras_chave: string[];
-  texto: string;
-  embedding: number[];
-  categoria: string;
+  title: string;
+  category: string;
+  source: string;
+  type: string;
+  article: string;
+  content: string;
+  metadata: any;
 }
 
 @Injectable()
 export class KnowledgeService implements OnModuleInit {
+  private readonly logger = new Logger(KnowledgeService.name);
+  
   private rootPath = path.join(
     process.cwd().endsWith('backend') ? path.resolve(process.cwd(), '..') : process.cwd(),
     'Conhecimento'
   );
-  private storePath = path.join(this.rootPath, 'vector-store.json');
+  
   private vectorDimensions = 384;
 
-  onModuleInit() {
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly supabaseService: SupabaseService,
+  ) {}
+
+  async onModuleInit() {
     // Garante que a estrutura de pastas recomendada exista
     const folders = [
       'Constituição',
@@ -38,6 +47,8 @@ export class KnowledgeService implements OnModuleInit {
       'Meio Ambiente',
       'Eleitoral',
       'Redação Oficial',
+      'Base Municipal',
+      'Base do Usuário'
     ];
 
     if (!fs.existsSync(this.rootPath)) {
@@ -51,13 +62,61 @@ export class KnowledgeService implements OnModuleInit {
       }
     });
 
-    // Inicializa o arquivo de banco vetorial vazio se não existir
-    if (!fs.existsSync(this.storePath)) {
-      fs.writeFileSync(this.storePath, JSON.stringify([]));
+    // Inicializa o bucket "knowledge-base" no Supabase Storage de forma segura
+    try {
+      const supabase = this.supabaseService.getClient();
+      const { data: buckets, error: listError } = await supabase.storage.listBuckets();
+      if (!listError && buckets) {
+        const exists = buckets.some((b) => b.name === 'knowledge-base');
+        if (!exists) {
+          const { error: createError } = await supabase.storage.createBucket('knowledge-base', {
+            public: true,
+          });
+          if (createError) {
+            this.logger.warn(`Não foi possível criar o bucket "knowledge-base": ${createError.message}`);
+          } else {
+            this.logger.log('Bucket "knowledge-base" criado com sucesso no Supabase Storage.');
+          }
+        } else {
+          this.logger.log('Bucket "knowledge-base" já existe no Supabase Storage.');
+        }
+      }
+    } catch (e) {
+      this.logger.warn('Modo Demo: Falha ao conectar ao Supabase Storage. Usando armazenamento e processamento local.');
     }
   }
 
-  // Gera embeddings determinísticos off-line para similaridade de cosseno
+  // Faz upload de arquivos PDF para o Supabase Storage se disponível
+  async uploadToSupabase(fileBuffer: Buffer, fileName: string, mimeType: string, folder: string): Promise<string | null> {
+    try {
+      const supabase = this.supabaseService.getClient();
+      const cleanFileName = fileName.replace(/[^a-zA-Z0-9.\-_]/g, '_');
+      const filePath = `${folder}/${Date.now()}_${cleanFileName}`;
+      
+      const { data, error } = await supabase.storage
+        .from('knowledge-base')
+        .upload(filePath, fileBuffer, {
+          contentType: mimeType,
+          upsert: true,
+        });
+
+      if (error) {
+        this.logger.warn(`Erro no upload Supabase Storage: ${error.message}`);
+        return null;
+      }
+      
+      const { data: publicUrlData } = supabase.storage
+        .from('knowledge-base')
+        .getPublicUrl(filePath);
+
+      return publicUrlData?.publicUrl || null;
+    } catch (error) {
+      this.logger.warn('Supabase offline ou chaves ausentes. Prosseguindo sem upload em nuvem.');
+      return null;
+    }
+  }
+
+  // Gera embeddings determinísticos de 384 dimensões offline
   generateEmbedding(text: string): number[] {
     const embedding = new Array(this.vectorDimensions).fill(0);
     const cleanText = text.toLowerCase().replace(/[^\w\s]/g, '');
@@ -73,26 +132,116 @@ export class KnowledgeService implements OnModuleInit {
       embedding[i] = Math.tanh(val / (words.length || 1));
     }
 
-    // L2 Normalization (comprimento unitário)
+    // L2 Normalization
     const magnitude = Math.sqrt(embedding.reduce((sum, val) => sum + val * val, 0));
     return magnitude > 0 ? embedding.map((val) => val / magnitude) : embedding;
   }
 
-  // Calcula similaridade de cosseno entre dois vetores
-  private cosineSimilarity(vecA: number[], vecB: number[]): number {
-    let dotProduct = 0;
-    let normA = 0;
-    let normB = 0;
-    for (let i = 0; i < vecA.length; i++) {
-      dotProduct += vecA[i] * vecB[i];
-      normA += vecA[i] * vecA[i];
-      normB += vecB[i] * vecB[i];
+  // Algoritmo de chunking estrito: nunca divide artigos, parágrafos ou incisos ao meio
+  chunkText(text: string, title: string, category: string, source: string): KnowledgeChunk[] {
+    const lines = text.split('\n');
+    const units: string[] = [];
+    let currentUnit = '';
+
+    // Regexes de divisões legais
+    const articleRegex = /^\s*(Art\.\s*\d+|Artigo\s*\d+)/i;
+    const paragraphRegex = /^\s*(§\s*\d+|Parágrafo\s*único)/i;
+    const clauseRegex = /^\s*([IVXLCDM]+\s*[-–]\s*)/i; // Incisos em algarismos romanos
+    const sectionRegex = /^\s*(CAPÍTULO|TÍTULO|SEÇÃO|SECCÃO)\s+[IVXLCDM\d+]/i;
+
+    lines.forEach((line) => {
+      const trimmedLine = line.trim();
+      if (!trimmedLine) return;
+
+      if (
+        articleRegex.test(trimmedLine) ||
+        paragraphRegex.test(trimmedLine) ||
+        clauseRegex.test(trimmedLine) ||
+        sectionRegex.test(trimmedLine)
+      ) {
+        if (currentUnit.trim()) {
+          units.push(currentUnit.trim());
+        }
+        currentUnit = line;
+      } else {
+        currentUnit += (currentUnit ? ' ' : '') + line;
+      }
+    });
+
+    if (currentUnit.trim()) {
+      units.push(currentUnit.trim());
     }
-    return normB && normA ? dotProduct / (Math.sqrt(normA) * Math.sqrt(normB)) : 0;
+
+    // Fallback: se o PDF não for formatado em lei, divide por sentenças a cada 800 caracteres
+    if (units.length <= 1) {
+      const sentences = text.match(/[^.!?]+[.!?]+(\s|$)/g) || [text];
+      let temp = '';
+      sentences.forEach((s) => {
+        if (temp.length + s.length > 800) {
+          units.push(temp.trim());
+          temp = s;
+        } else {
+          temp += s;
+        }
+      });
+      if (temp.trim()) units.push(temp.trim());
+    }
+
+    const chunks: any[] = [];
+    let currentChunk = '';
+    let activeArticle = 'Preâmbulo';
+
+    units.forEach((unit) => {
+      const artMatch = unit.match(/(Art\.\s*\d+|Artigo\s*\d+|CAPÍTULO\s+[IVXLCDM\d+]+|SEÇÃO\s+[IVXLCDM\d+]+)/i);
+      if (artMatch) {
+        activeArticle = artMatch[1];
+      }
+
+      if (unit.length > 1000) {
+        if (currentChunk.trim()) {
+          chunks.push({ content: currentChunk.trim(), article: activeArticle });
+          currentChunk = '';
+        }
+        chunks.push({ content: unit.trim(), article: activeArticle });
+        return;
+      }
+
+      if (currentChunk.length + unit.length > 1000) {
+        if (currentChunk.trim()) {
+          chunks.push({ content: currentChunk.trim(), article: activeArticle });
+        }
+        currentChunk = unit;
+      } else {
+        currentChunk += (currentChunk ? '\n\n' : '') + unit;
+      }
+    });
+
+    if (currentChunk.trim()) {
+      chunks.push({ content: currentChunk.trim(), article: activeArticle });
+    }
+
+    return chunks.map((c, index) => {
+      const headerContext = `[${title}] | Categoria: ${category} | Seção/Artigo: ${c.article}\n\n`;
+      return {
+        id: `${title.replace(/[^a-zA-Z0-9]/g, '_')}-chunk-${index}`,
+        title,
+        category,
+        source, // NACIONAL, MUNICIPAL, USUARIO
+        type: category.toUpperCase().includes('CONSTITUIÇÃO') ? 'CONSTITUICAO' : 'LEI',
+        article: c.article,
+        content: headerContext + c.content,
+        metadata: {
+          original_length: c.content.length,
+          chunk_index: index,
+          total_chunks: chunks.length,
+          article: c.article,
+        },
+      };
+    });
   }
 
-  // Extrai texto de um PDF, fatia por artigo/seção e salva no arquivo do banco vetorial
-  async indexFile(filePath: string, category: string): Promise<number> {
+  // Extrai texto do PDF e insere os chunks indexados no banco pgvector
+  async indexFile(filePath: string, category: string, source = 'NACIONAL'): Promise<number> {
     if (!fs.existsSync(filePath)) {
       throw new Error(`Arquivo não encontrado: ${filePath}`);
     }
@@ -101,114 +250,82 @@ export class KnowledgeService implements OnModuleInit {
     const pdfData = await (pdf as any)(dataBuffer);
     const text = pdfData.text;
 
-    // Fatiamento por artigos (regex que captura 'Art. XX' ou 'Artigo XX')
-    // Se não contiver padrão de artigos, fatia por parágrafos/seções
-    const articleRegex = /(?=Art\.\s*\d+|Artigo\s*\d+)/gi;
-    let chunksText = text.split(articleRegex);
-
-    // Se o documento não foi dividido (não possui palavra "Art."), divide a cada 1000 caracteres
-    if (chunksText.length <= 1) {
-      chunksText = text.match(/[^.!?]+[.!?]+(\s|$)/g) || [text];
-      // Agrupa em blocos de tamanho razoável (1000 chars)
-      const groupedChunks: string[] = [];
-      let temp = '';
-      chunksText.forEach((c: string) => {
-        if (temp.length + c.length > 1000) {
-          groupedChunks.push(temp.trim());
-          temp = c;
-        } else {
-          temp += c;
-        }
-      });
-      if (temp.trim()) groupedChunks.push(temp.trim());
-      chunksText = groupedChunks;
-    }
-
     const fileName = path.basename(filePath, path.extname(filePath));
-    const newChunks: KnowledgeChunk[] = [];
+    const title = fileName.replace(/_/g, ' ');
 
-    chunksText.forEach((chunk: string, index: number) => {
-      const trimmedChunk = chunk.trim();
-      if (trimmedChunk.length < 30) return; // descarta fragmentos inúteis
+    const newChunks = this.chunkText(text, title, category, source);
 
-      // Tenta capturar a numeração do artigo no início do chunk
-      const artMatch = trimmedChunk.match(/^(Art\.\s*\d+|Artigo\s*\d+)/i);
-      const artigoLabel = artMatch ? artMatch[1] : `Seção ${index + 1}`;
+    for (const chunk of newChunks) {
+      const embedding = this.generateEmbedding(chunk.content);
+      const embeddingString = `[${embedding.join(',')}]`;
 
-      // Extrai palavras-chave e ementa do chunk
-      const cleanWords = trimmedChunk
-        .toLowerCase()
-        .replace(/[^\w\s]/g, '')
-        .split(/\s+/)
-        .filter((w: string) => w.length > 4 && !this.isStopword(w));
+      // Evita duplicações
+      await this.prisma.$executeRawUnsafe(
+        `DELETE FROM documents WHERE id = $1`,
+        chunk.id
+      );
 
-      // Pega as 5 mais frequentes como palavras-chave
-      const wordCounts: Record<string, number> = {};
-      cleanWords.forEach((w: string) => {
-        wordCounts[w] = (wordCounts[w] || 0) + 1;
-      });
-      const sortedWords = Object.keys(wordCounts).sort((a, b) => wordCounts[b] - wordCounts[a]);
-      const keywords = sortedWords.slice(0, 5);
-
-      // Infere assunto simples baseado nas principais palavras-chave
-      const subjects = keywords.map((k) => k.charAt(0).toUpperCase() + k.slice(1));
-
-      const embedding = this.generateEmbedding(trimmedChunk);
-
-      newChunks.push({
-        id: `${fileName}-chunk-${index}`,
-        titulo: fileName.replace(/_/g, ' '),
-        artigo: artigoLabel,
-        assunto: subjects.slice(0, 2),
-        palavras_chave: keywords,
-        texto: trimmedChunk,
-        embedding: embedding,
-        categoria: category,
-      });
-    });
-
-    // Mescla com banco vetorial local existente, removendo duplicados do mesmo arquivo
-    const currentStore: KnowledgeChunk[] = JSON.parse(fs.readFileSync(this.storePath, 'utf8'));
-    const filteredStore = currentStore.filter((c) => !c.id.startsWith(`${fileName}-`));
-    const updatedStore = [...filteredStore, ...newChunks];
-
-    fs.writeFileSync(this.storePath, JSON.stringify(updatedStore, null, 2));
+      // Insere o chunk no banco via SQL brutas
+      await this.prisma.$executeRawUnsafe(
+        `INSERT INTO documents (id, titulo, categoria, fonte, tipo, numero, artigo, texto, metadata, embedding, data_criacao)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::vector, $11)`,
+        chunk.id,
+        chunk.title,
+        chunk.category,
+        chunk.source,
+        chunk.type,
+        null,
+        chunk.article,
+        chunk.content,
+        JSON.stringify(chunk.metadata),
+        embeddingString,
+        new Date()
+      );
+    }
 
     return newChunks.length;
   }
 
-  // Faz a varredura recursiva da pasta Conhecimento para indexar novos PDFs
+  // Faz a varredura recursiva das pastas de Conhecimento do servidor para indexar PDFs
   async indexAll(): Promise<any> {
     const indexedFiles: string[] = [];
     let totalChunks = 0;
 
-    const scanDir = async (dir: string, category: string) => {
+    const scanDir = async (dir: string, category: string, source: string) => {
       const items = fs.readdirSync(dir);
       for (const item of items) {
         const fullPath = path.join(dir, item);
         const stat = fs.statSync(fullPath);
         if (stat.isDirectory()) {
-          // Mantém a categoria principal na recursão de subpastas (ex: Licitações/Acordaos_TCU)
-          await scanDir(fullPath, category || item);
+          await scanDir(fullPath, category || item, source);
         } else if (stat.isFile() && path.extname(item).toLowerCase() === '.pdf') {
           try {
-            const chunksCount = await this.indexFile(fullPath, category || 'Geral');
+            const chunksCount = await this.indexFile(fullPath, category || 'Geral', source);
             indexedFiles.push(item);
             totalChunks += chunksCount;
           } catch (e) {
-            console.error(`Erro ao indexar arquivo: ${fullPath}`, e);
+            this.logger.error(`Erro ao indexar arquivo: ${fullPath}`, e);
           }
         }
       }
     };
 
-    const items = fs.readdirSync(this.rootPath);
-    for (const item of items) {
-      const fullPath = path.join(this.rootPath, item);
-      const stat = fs.statSync(fullPath);
-      // Evita indexar o próprio vector-store.json como pasta
-      if (stat.isDirectory()) {
-        await scanDir(fullPath, item);
+    if (fs.existsSync(this.rootPath)) {
+      const items = fs.readdirSync(this.rootPath);
+      for (const item of items) {
+        const fullPath = path.join(this.rootPath, item);
+        const stat = fs.statSync(fullPath);
+        if (stat.isDirectory()) {
+          // Determina a fonte
+          let source = 'NACIONAL';
+          const name = item.toLowerCase();
+          if (name.includes('municipal') || name.includes('prefeitura')) {
+            source = 'MUNICIPAL';
+          } else if (name.includes('usuario') || name.includes('usuário') || name.includes('pessoal')) {
+            source = 'USUARIO';
+          }
+          await scanDir(fullPath, item, source);
+        }
       }
     }
 
@@ -220,88 +337,104 @@ export class KnowledgeService implements OnModuleInit {
     };
   }
 
-  // Pesquisa semântica no banco vetorial via similaridade de cosseno com bônus de prioridade legal
+  // Realiza a busca vetorial (pgvector) aplicando o bônus de prioridade legal
   async search(query: string, limit = 5): Promise<any[]> {
-    if (!fs.existsSync(this.storePath)) {
-      return [];
-    }
-
-    const store: KnowledgeChunk[] = JSON.parse(fs.readFileSync(this.storePath, 'utf8'));
-    if (store.length === 0) return [];
+    if (!query) return [];
 
     const queryEmbedding = this.generateEmbedding(query);
+    const queryEmbeddingString = `[${queryEmbedding.join(',')}]`;
 
-    const scoredChunks = store.map((chunk) => {
-      const baseSimilarity = this.cosineSimilarity(queryEmbedding, chunk.embedding);
-      
-      // Aplica bônus de prioridade com base na categoria
-      let priorityBonus = 0;
-      const cat = chunk.categoria.toLowerCase();
-      
-      if (cat.includes('constituição')) {
-        priorityBonus = 0.25; // Prioridade 1: CF/88 e LINDB
-      } else if (
-        cat.includes('administração pública') || 
-        cat.includes('direito civil') || 
-        cat.includes('tributário') || 
-        cat.includes('trabalho') || 
-        cat.includes('saúde') || 
-        cat.includes('educação') || 
-        cat.includes('assistência social') || 
-        cat.includes('meio ambiente') || 
-        cat.includes('eleitoral')
-      ) {
-        priorityBonus = 0.18; // Prioridade 2: Leis Federais
-      } else if (cat.includes('decreto')) {
-        priorityBonus = 0.14; // Prioridade 3: Decretos
-      } else if (cat.includes('acórdãos tcu') || cat.includes('acordao')) {
-        priorityBonus = 0.11; // Prioridade 4: Acórdãos TCU
-      } else if (cat.includes('jurisprudência') || cat.includes('súmula')) {
-        priorityBonus = 0.08; // Prioridade 5: Súmulas STF/STJ
-      } else if (cat.includes('agu')) {
-        priorityBonus = 0.06; // Prioridade 6: AGU
-      } else if (cat.includes('cgu') || cat.includes('transparência')) {
-        priorityBonus = 0.04; // Prioridade 7: CGU
-      } else if (cat.includes('redação oficial') || cat.includes('manuais') || cat.includes('licitações')) {
-        priorityBonus = 0.02; // Prioridade 8: Manuais Técnicos e Oficiais
-      } else if (cat.includes('projeto de lei')) {
-        priorityBonus = 0.16; // Proposições legislativas (entre Leis Federais e Decretos)
-      }
+    try {
+      // Query SQL crua usando a distância do cosseno (<=>) do pgvector
+      const dbResults: any[] = await this.prisma.$queryRawUnsafe(
+        `SELECT id, titulo, categoria, fonte, tipo, numero, artigo, texto, metadata, data_criacao,
+                (1 - (embedding <=> $1::vector)) as similarity
+         FROM documents
+         ORDER BY embedding <=> $1::vector ASC
+         LIMIT $2`,
+        queryEmbeddingString,
+        limit * 2 // buscamos o dobro e refinamos com bônus de prioridade
+      );
 
-      // O score final combina a similaridade base com o bônus de prioridade ponderado
-      const finalScore = Math.min(1.0, baseSimilarity + priorityBonus * 0.4);
+      if (!dbResults || dbResults.length === 0) return [];
 
-      return {
-        titulo: chunk.titulo,
-        artigo: chunk.artigo,
-        assunto: chunk.assunto,
-        palavras_chave: chunk.palavras_chave,
-        texto: chunk.texto,
-        categoria: chunk.categoria,
-        score: finalScore,
-      };
-    });
+      const scoredChunks = dbResults.map((chunk) => {
+        const baseSimilarity = Number(chunk.similarity || 0);
+        let priorityBonus = 0;
+        
+        const cat = (chunk.categoria || '').toLowerCase();
+        const fonte = (chunk.fonte || '').toLowerCase();
 
-    // Ordena pelo score decrescente e limita
-    return scoredChunks
-      .sort((a, b) => b.score - a.score)
-      .slice(0, limit);
+        // Hierarquia de prioridade legal (Regra AGENTS.md)
+        if (cat.includes('constituição') || cat.includes('fundamentais') || cat.includes('lindb')) {
+          priorityBonus = 0.25; // Prioridade 1: CF/88
+        } else if (fonte === 'nacional' && (
+          cat.includes('administração pública') ||
+          cat.includes('licitações') ||
+          cat.includes('lei 14.133') ||
+          cat.includes('responsabilidade fiscal') ||
+          cat.includes('lrf') ||
+          cat.includes('acesso à informação') ||
+          cat.includes('lgpd') ||
+          cat.includes('processo administrativo') ||
+          cat.includes('educação') ||
+          cat.includes('saúde') ||
+          cat.includes('direito civil') ||
+          cat.includes('tributário') ||
+          cat.includes('trabalho')
+        )) {
+          priorityBonus = 0.18; // Prioridade 2: Leis Federais
+        } else if (cat.includes('decreto')) {
+          priorityBonus = 0.14; // Prioridade 3: Decretos
+        } else if (cat.includes('acórdão') || cat.includes('acordao') || cat.includes('tcu')) {
+          priorityBonus = 0.11; // Prioridade 4: Acórdãos TCU
+        } else if (cat.includes('súmula') || cat.includes('sumula') || cat.includes('repetitivos')) {
+          priorityBonus = 0.08; // Prioridade 5: Súmulas STF/STJ
+        } else if (cat.includes('agu')) {
+          priorityBonus = 0.06; // Prioridade 6: AGU
+        } else if (cat.includes('cgu')) {
+          priorityBonus = 0.04; // Prioridade 7: CGU
+        } else {
+          priorityBonus = 0.02; // Leis Municipais, Manuais Técnicos e Base do Usuário
+        }
+
+        const finalScore = Math.min(1.0, baseSimilarity + priorityBonus * 0.4);
+
+        return {
+          id: chunk.id,
+          titulo: chunk.titulo,
+          artigo: chunk.artigo || 'Geral',
+          texto: chunk.texto,
+          categoria: chunk.categoria,
+          fonte: chunk.fonte,
+          score: finalScore,
+        };
+      });
+
+      return scoredChunks
+        .sort((a, b) => b.score - a.score)
+        .slice(0, limit);
+
+    } catch (err) {
+      this.logger.error('Erro na busca vetorial pgvector. Verifique a tabela no banco.', err);
+      return [];
+    }
   }
 
-  // Retorna os diretórios e arquivos de conhecimento existentes
+  // Varre a pasta física para expor a estrutura de diretórios e arquivos
   getFilesStructure(): any {
     const getStructure = (dir: string) => {
-      const structure: any = { name: path.basename(dir), isDirectory: true, children: [] };
+      const name = path.basename(dir);
+      const structure: any = { name, isDirectory: true, children: [] };
+      if (!fs.existsSync(dir)) return structure;
+
       const items = fs.readdirSync(dir);
       items.forEach((item) => {
-        // Ignora o store JSON
-        if (item === 'vector-store.json') return;
-
         const fullPath = path.join(dir, item);
         const stat = fs.statSync(fullPath);
         if (stat.isDirectory()) {
           structure.children.push(getStructure(fullPath));
-        } else {
+        } else if (path.extname(item).toLowerCase() === '.pdf') {
           structure.children.push({
             name: item,
             isDirectory: false,
@@ -318,16 +451,5 @@ export class KnowledgeService implements OnModuleInit {
 
   getRootPath(): string {
     return this.rootPath;
-  }
-
-  private isStopword(word: string): boolean {
-    const stopwords = [
-      'para', 'como', 'uma', 'umas', 'pelo', 'pela', 'pelos', 'pelas', 'com', 'sem', 'sob', 'sobre',
-      'mais', 'menos', 'este', 'esta', 'estes', 'estas', 'aquele', 'aquela', 'aqueles', 'aquelas',
-      'seus', 'suas', 'meus', 'minhas', 'teus', 'tua', 'isso', 'isto', 'aquilo', 'tendo', 'sendo',
-      'forma', 'lei', 'artigo', 'decreto', 'portaria', 'onde', 'quando', 'quem', 'cujo', 'cuja',
-      'art', 'lei', 'leis', 'artigos', 'conforme', 'nos', 'nas', 'dos', 'das', 'uma', 'um'
-    ];
-    return stopwords.includes(word);
   }
 }

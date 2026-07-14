@@ -2,11 +2,13 @@
 // learn more about it in the docs: https://pris.ly/d/prisma-schema
 
 datasource db {
-  provider = "postgresql"
+  provider   = "postgresql"
+  extensions = [pgvector(map: "vector")]
 }
 
 generator client {
-  provider = "prisma-client-js"
+  provider        = "prisma-client-js"
+  previewFeatures = ["postgresqlExtensions"]
 }
 
 model Municipality {
@@ -87,19 +89,37 @@ model Document {
   histories      DocumentHistory[]
   signature      DigitalSignature?
 
-  @@map("documents")
+  @@map("generated_documents")
 }
 
 model DocumentHistory {
-  id         String   @id @default(uuid())
-  documentId String
-  document   Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
-  content    String   @db.Text
-  authorId   String
-  author     User     @relation(fields: [authorId], references: [id])
-  createdAt  DateTime @default(now())
+  id              String   @id @default(uuid())
+  documentId      String
+  document        Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  content         String   @db.Text
+  originalContent String?  @db.Text
+  diff            Json?
+  authorId        String
+  author          User     @relation(fields: [authorId], references: [id])
+  createdAt       DateTime @default(now())
 
   @@map("document_histories")
+}
+
+model KnowledgeChunk {
+  id        String                    @id @default(uuid())
+  title     String                    @map("titulo")
+  category  String                    @map("categoria")
+  source    String                    @map("fonte")     // NACIONAL, MUNICIPAL, USUARIO
+  type      String                    @map("tipo")      // CONSTITUICAO, LEI, DECRETO, PORTARIA, OFICIO, PARECER, etc.
+  number    String?                   @map("numero")
+  article   String?                   @map("artigo")
+  content   String                    @db.Text @map("texto")
+  metadata  Json?                     @map("metadata")
+  embedding Unsupported("vector(384)")?
+  createdAt DateTime                  @default(now()) @map("data_criacao")
+
+  @@map("documents")
 }
 
 model FavoriteDocument {

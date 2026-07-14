@@ -41,6 +41,18 @@ let DocumentController = class DocumentController {
         const usrId = userId || 'usr-default-id';
         return this.documentService.getStats(secId, usrId);
     }
+    async findOne(id) {
+        return this.documentService.findOne(id);
+    }
+    async update(id, body) {
+        const authorId = body.authorId || 'usr-default-id';
+        return this.documentService.update(id, {
+            title: body.title,
+            content: body.content,
+            status: body.status,
+            authorId,
+        });
+    }
     async sign(body) {
         return this.documentService.sign(body.documentId, body.signerName, body.signerDocument, body.signatureHash);
     }
@@ -75,6 +87,21 @@ __decorate([
     __metadata("design:paramtypes", [String, String]),
     __metadata("design:returntype", Promise)
 ], DocumentController.prototype, "getStats", null);
+__decorate([
+    (0, common_1.Get)(':id'),
+    __param(0, (0, common_1.Param)('id')),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [String]),
+    __metadata("design:returntype", Promise)
+], DocumentController.prototype, "findOne", null);
+__decorate([
+    (0, common_1.Put)(':id'),
+    __param(0, (0, common_1.Param)('id')),
+    __param(1, (0, common_1.Body)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [String, Object]),
+    __metadata("design:returntype", Promise)
+], DocumentController.prototype, "update", null);
 __decorate([
     (0, common_1.Post)('sign'),
     __param(0, (0, common_1.Body)()),

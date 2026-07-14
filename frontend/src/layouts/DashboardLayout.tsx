@@ -8,6 +8,7 @@ import {
   LogOut,
   Building,
   User as UserIcon,
+  Brain,
 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { Button } from '../components/ui/Button';
@@ -37,6 +38,11 @@ export const DashboardLayout: React.FC<{ children: React.ReactNode }> = ({ child
       label: 'Modelos Oficiais',
       path: '/modelos',
       icon: <FolderOpen size={20} />,
+    },
+    {
+      label: 'Base de Conhecimento',
+      path: '/conhecimento',
+      icon: <Brain size={20} />,
     },
     {
       label: 'Prefeitura e Órgão',

@@ -193,12 +193,12 @@ Atenciosamente,`;
     // Regra do prompt da IA: anexar fundamentação RAG
     let fundamentacaoLegal = '';
     if (hasRagBase) {
-      fundamentacaoLegal = `\n\n=== FUNDAMENTAÇÃO LEGAL (Consulta Base de Conhecimento Jurídica) ===\n` +
+      fundamentacaoLegal = `\n\n=== FUNDAMENTAÇÃO LEGAL (Consulta Base de Conhecimento RAG) ===\n` +
         ragResults
-          .map((r, i) => `[Referência ${i + 1}] ${r.artigo} da obra "${r.titulo}" (${r.categoria}):\n"${r.texto}"`)
+          .map((r, i) => `[Referência ${i + 1}] ${r.artigo} de "${r.titulo}" (${r.categoria}):\n"${r.texto}"`)
           .join('\n\n');
     } else {
-      fundamentacaoLegal = `\n\n=== ANÁLISE JURÍDICA (Consulta Base de Conhecimento Jurídica) ===\nAlerta do Sistema: Não foi localizada fundamentação suficiente específica para este caso na Base de Conhecimento Jurídica. Conforme as regras de precisão da IA, foi evitada a invenção de dispositivos legais.`;
+      fundamentacaoLegal = `\n\n=== ANÁLISE JURÍDICA (Consulta Base de Conhecimento RAG) ===\nAlerta do Sistema: Não foi localizada fundamentação suficiente específica para este caso na Base de Conhecimento Jurídica. Conforme as regras de precisão da IA, foi evitada a invenção de dispositivos legais.`;
     }
 
     const content = `MUNICÍPIO DE ${munNameNormalized.toUpperCase()}\nSECRETARIA MUNICIPAL DE ${secNameNormalized.toUpperCase()}\n\n${typeLabel} Nº [NÚMERO]/${year}\n\n${bodyText}${fundamentacaoLegal}\n\n\n\n\n__________________________________\nServidor Responsável\n${secNameNormalized}`;
@@ -257,6 +257,118 @@ Atenciosamente,`;
       pending,
       templates,
       favorites,
+    };
+  }
+
+  async findOne(id: string) {
+    const doc = await this.prisma.document.findUnique({
+      where: { id },
+      include: {
+        author: { select: { name: true, email: true } },
+        secretariat: { select: { name: true } },
+        histories: {
+          orderBy: { createdAt: 'desc' },
+          include: {
+            author: { select: { name: true } },
+          },
+        },
+      },
+    });
+
+    if (!doc) {
+      throw new NotFoundException('Documento não localizado.');
+    }
+
+    return doc;
+  }
+
+  async update(id: string, data: { title?: string; content?: string; status?: string; authorId: string }) {
+    const currentDoc = await this.prisma.document.findUnique({
+      where: { id },
+    });
+
+    if (!currentDoc) {
+      throw new NotFoundException('Documento não localizado.');
+    }
+
+    const updatedDoc = await this.prisma.$transaction(async (tx) => {
+      // 1. Atualiza o documento
+      const updated = await tx.document.update({
+        where: { id },
+        data: {
+          title: data.title !== undefined ? data.title : currentDoc.title,
+          content: data.content !== undefined ? data.content : currentDoc.content,
+          status: data.status !== undefined ? data.status : currentDoc.status,
+        },
+      });
+
+      // 2. Se o conteúdo mudou, calcula o diff e grava no histórico de revisões (Aprendizado de IA)
+      if (data.content !== undefined && data.content !== currentDoc.content) {
+        const diffData = this.calculateDiff(currentDoc.content, data.content);
+        
+        await tx.documentHistory.create({
+          data: {
+            documentId: id,
+            content: data.content,
+            originalContent: currentDoc.content,
+            diff: diffData as any,
+            authorId: data.authorId,
+          },
+        });
+      }
+
+      return updated;
+    });
+
+    return updatedDoc;
+  }
+
+  // Compara linha a linha para detectar adições, remoções e modificações
+  private calculateDiff(original: string, modified: string) {
+    const originalLines = original.split('\n');
+    const modifiedLines = modified.split('\n');
+    const changes: any[] = [];
+    let insertions = 0;
+    let deletions = 0;
+
+    const maxLines = Math.max(originalLines.length, modifiedLines.length);
+
+    for (let i = 0; i < maxLines; i++) {
+      const orig = originalLines[i];
+      const mod = modifiedLines[i];
+
+      if (orig !== mod) {
+        if (orig !== undefined && mod !== undefined) {
+          changes.push({
+            type: 'modified',
+            line: i + 1,
+            originalText: orig,
+            modifiedText: mod,
+          });
+          insertions++;
+          deletions++;
+        } else if (orig !== undefined) {
+          changes.push({
+            type: 'removed',
+            line: i + 1,
+            text: orig,
+          });
+          deletions++;
+        } else if (mod !== undefined) {
+          changes.push({
+            type: 'added',
+            line: i + 1,
+            text: mod,
+          });
+          insertions++;
+        }
+      }
+    }
+
+    return {
+      insertions,
+      deletions,
+      changes,
     };
   }
 

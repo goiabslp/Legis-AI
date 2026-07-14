@@ -47,9 +47,11 @@ export class KnowledgeController {
     FileInterceptor('file', {
       storage: diskStorage({
         destination: (req: any, file: any, cb: any) => {
-          const service = new KnowledgeService();
-          const rootPath = service.getRootPath();
-          // Pega a categoria do body da requisição (ex: 'Constituição', 'Licitações/Acordaos_TCU')
+          const rootPath = path.join(
+            process.cwd().endsWith('backend') ? path.resolve(process.cwd(), '..') : process.cwd(),
+            'Conhecimento'
+          );
+          // Pega a categoria do body da requisição
           const category = req.body.category || 'Geral';
           const destinationPath = path.join(rootPath, category);
           
@@ -59,7 +61,6 @@ export class KnowledgeController {
           cb(null, destinationPath);
         },
         filename: (req: any, file: any, cb: any) => {
-          // Mantém o nome amigável do arquivo limpando caracteres estranhos
           const safeName = file.originalname.replace(/[^a-zA-Z0-9.\-_]/g, '_');
           cb(null, safeName);
         },
@@ -69,22 +70,34 @@ export class KnowledgeController {
   async uploadFile(
     @UploadedFile() file: any,
     @Body('category') category: string,
+    @Body('source') source?: string,
   ) {
     if (!file) {
       throw new BadRequestException('Nenhum arquivo enviado.');
     }
 
     const cat = category || 'Geral';
-    // Indexa o arquivo que acabou de ser adicionado
-    const chunksCount = await this.knowledgeService.indexFile(file.path, cat);
+    const src = source || 'NACIONAL';
+
+    try {
+      const fileBuffer = fs.readFileSync(file.path);
+      const folder = src.toLowerCase();
+      await this.knowledgeService.uploadToSupabase(fileBuffer, file.filename, file.mimetype, folder);
+    } catch (e) {
+      // Ignora erro no upload do supabase para continuar localmente
+    }
+
+    // Indexa o arquivo que acabou de ser adicionado no pgvector
+    const chunksCount = await this.knowledgeService.indexFile(file.path, cat, src);
 
     return {
       success: true,
-      message: `Arquivo ${file.filename} adicionado e indexado na categoria "${cat}" com sucesso.`,
+      message: `Arquivo ${file.filename} adicionado e indexado na categoria "${cat}" (${src}) com sucesso.`,
       filename: file.filename,
       sizeBytes: file.size,
       path: file.path,
       category: cat,
+      source: src,
       chunksCount,
     };
   }

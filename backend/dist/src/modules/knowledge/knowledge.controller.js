@@ -75,19 +75,28 @@ let KnowledgeController = class KnowledgeController {
     getFilesStructure() {
         return this.knowledgeService.getFilesStructure();
     }
-    async uploadFile(file, category) {
+    async uploadFile(file, category, source) {
         if (!file) {
             throw new common_1.BadRequestException('Nenhum arquivo enviado.');
         }
         const cat = category || 'Geral';
-        const chunksCount = await this.knowledgeService.indexFile(file.path, cat);
+        const src = source || 'NACIONAL';
+        try {
+            const fileBuffer = fs.readFileSync(file.path);
+            const folder = src.toLowerCase();
+            await this.knowledgeService.uploadToSupabase(fileBuffer, file.filename, file.mimetype, folder);
+        }
+        catch (e) {
+        }
+        const chunksCount = await this.knowledgeService.indexFile(file.path, cat, src);
         return {
             success: true,
-            message: `Arquivo ${file.filename} adicionado e indexado na categoria "${cat}" com sucesso.`,
+            message: `Arquivo ${file.filename} adicionado e indexado na categoria "${cat}" (${src}) com sucesso.`,
             filename: file.filename,
             sizeBytes: file.size,
             path: file.path,
             category: cat,
+            source: src,
             chunksCount,
         };
     }
@@ -118,8 +127,7 @@ __decorate([
     (0, common_1.UseInterceptors)((0, platform_express_1.FileInterceptor)('file', {
         storage: (0, multer_1.diskStorage)({
             destination: (req, file, cb) => {
-                const service = new knowledge_service_1.KnowledgeService();
-                const rootPath = service.getRootPath();
+                const rootPath = path.join(process.cwd().endsWith('backend') ? path.resolve(process.cwd(), '..') : process.cwd(), 'Conhecimento');
                 const category = req.body.category || 'Geral';
                 const destinationPath = path.join(rootPath, category);
                 if (!fs.existsSync(destinationPath)) {
@@ -135,8 +143,9 @@ __decorate([
     })),
     __param(0, (0, common_1.UploadedFile)()),
     __param(1, (0, common_1.Body)('category')),
+    __param(2, (0, common_1.Body)('source')),
     __metadata("design:type", Function),
-    __metadata("design:paramtypes", [Object, String]),
+    __metadata("design:paramtypes", [Object, String, String]),
     __metadata("design:returntype", Promise)
 ], KnowledgeController.prototype, "uploadFile", null);
 exports.KnowledgeController = KnowledgeController = __decorate([

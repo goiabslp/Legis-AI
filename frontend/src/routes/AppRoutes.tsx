@@ -9,6 +9,7 @@ import NewDocument from '../pages/NewDocument';
 import DocumentHistory from '../pages/DocumentHistory';
 import Templates from '../pages/Templates';
 import Settings from '../pages/Settings';
+import KnowledgeBase from '../pages/KnowledgeBase';
 
 const PrivateRoute: React.FC<{ children: React.ReactElement }> = ({ children }) => {
   return children;
@@ -70,6 +71,16 @@ export const AppRoutes: React.FC = () => {
               <PrivateRoute>
                 <DashboardLayout>
                   <Settings />
+                </DashboardLayout>
+              </PrivateRoute>
+            }
+          />
+          <Route
+            path="/conhecimento"
+            element={
+              <PrivateRoute>
+                <DashboardLayout>
+                  <KnowledgeBase />
                 </DashboardLayout>
               </PrivateRoute>
             }
