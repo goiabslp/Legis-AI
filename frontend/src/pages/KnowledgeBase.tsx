@@ -55,6 +55,17 @@ export const KnowledgeBase: React.FC = () => {
     fetchKnowledgeFiles();
   }, []);
 
+  // Sincroniza a categoria padrão selecionada ao trocar de aba no painel
+  useEffect(() => {
+    if (activeTab === 'nacional') {
+      setUploadCategory('Constituição');
+    } else if (activeTab === 'municipal') {
+      setUploadCategory('Base Municipal/Leis');
+    } else if (activeTab === 'usuario') {
+      setUploadCategory('Base do Usuário/Modelos');
+    }
+  }, [activeTab]);
+
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files[0]) {
       setSelectedFile(e.target.files[0]);
@@ -298,8 +309,11 @@ export const KnowledgeBase: React.FC = () => {
                           <option value="Constituição">Constituição e Normas Fundamentais</option>
                           <option value="Administração Pública">Administração Pública</option>
                           <option value="Acórdãos TCU">Acórdãos do TCU</option>
+                          <option value="Licitações/Manuais">Licitações - Manuais Oficiais</option>
+                          <option value="Licitações/Notas_Tecnicas">Licitações - Notas Técnicas</option>
+                          <option value="Licitações/Perguntas_Respostas">Licitações - Perguntas e Respostas</option>
                           <option value="Redação Oficial">Redação Oficial (Manual da Presidência)</option>
-                          <option value="Geral">Outros Federais</option>
+                          <option value="Geral">Outros Federais (Geral)</option>
                         </>
                       )}
                       {activeTab === 'municipal' && (
@@ -307,12 +321,14 @@ export const KnowledgeBase: React.FC = () => {
                           <option value="Base Municipal/Leis">Leis Municipais e Orgânica</option>
                           <option value="Base Municipal/Decretos">Decretos Executivos</option>
                           <option value="Base Municipal/Portarias">Portarias e Resoluções</option>
+                          <option value="Base Municipal">Geral Municipal</option>
                         </>
                       )}
                       {activeTab === 'usuario' && (
                         <>
                           <option value="Base do Usuário/Modelos">Modelos de Ofícios/Memorandos</option>
                           <option value="Base do Usuário/Pareceres">Pareceres Técnicos/Jurídicos</option>
+                          <option value="Base do Usuário">Geral do Usuário</option>
                         </>
                       )}
                     </select>

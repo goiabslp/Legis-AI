@@ -137,18 +137,20 @@ let KnowledgeService = KnowledgeService_1 = class KnowledgeService {
         }
     }
     generateEmbedding(text) {
-        const embedding = new Array(this.vectorDimensions).fill(0);
+        const embedding = new Array(this.vectorDimensions).fill(0.01);
         const cleanText = text.toLowerCase().replace(/[^\w\s]/g, '');
         const words = cleanText.split(/\s+/).filter((w) => w.length > 2);
-        for (let i = 0; i < this.vectorDimensions; i++) {
-            let val = 0;
-            words.forEach((word, wordIdx) => {
-                for (let charIdx = 0; charIdx < word.length; charIdx++) {
-                    val += Math.sin(word.charCodeAt(charIdx) * (i + 1) + wordIdx);
-                }
-            });
-            embedding[i] = Math.tanh(val / (words.length || 1));
-        }
+        if (words.length === 0)
+            return embedding;
+        words.forEach((word) => {
+            let hash = 5381;
+            for (let charIdx = 0; charIdx < word.length; charIdx++) {
+                hash = (hash * 33) ^ word.charCodeAt(charIdx);
+            }
+            const index = Math.abs(hash) % this.vectorDimensions;
+            const weight = 1.0 + (word.length * 0.15);
+            embedding[index] += weight;
+        });
         const magnitude = Math.sqrt(embedding.reduce((sum, val) => sum + val * val, 0));
         return magnitude > 0 ? embedding.map((val) => val / magnitude) : embedding;
     }
